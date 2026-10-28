@@ -14,6 +14,8 @@ public class MainActivity extends Activity {
     private final Handler timer=new Handler(Looper.getMainLooper());
     private AgentClient client;
     private ProfileStore profileStore;
+    private static final int SCAN_COMPUTER = 0x5152;
+    private boolean showingShareQr;
     private TextView status;
     private EditText query;
     private ListView list;
@@ -72,7 +74,7 @@ public class MainActivity extends Activity {
     private EditText input(LinearLayout box,String hint,String value){EditText e=new EditText(this);e.setSaveEnabled(false);e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);e.setHint(hint);e.setText(value);e.setSingleLine(true);box.addView(e);return e;}
     private void button(LinearLayout box,String label,Runnable action){Button b=new Button(this);b.setText(label);box.addView(b);b.setOnClickListener(v->action.run());}
     private LinearLayout connectionLayout(){
-        generation++;client=null;rows.clear();visible.clear();list=null;query=null;
+        generation++;client=null;rows.clear();visible.clear();list=null;query=null;showingShareQr=false;
         ScrollView scroll=new ScrollView(this);
         scroll.setFillViewport(true);
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,32,24,16);
@@ -80,6 +82,7 @@ public class MainActivity extends Activity {
     }
     private void connectionScreen(){
         LinearLayout box=connectionLayout();text(box,"Your computers",30);
+        button(box,"Agent setup guide",this::guideScreen);
         TextView note=text(box,"Loading saved computers…",15);
         final int epoch=generation;
         worker.execute(()->{
@@ -105,6 +108,7 @@ public class MainActivity extends Activity {
                     button(box,"Edit / forget "+profile.optString("name"),()->editProfile(profile));
                 }
                 button(box,"Add computer",()->editProfile(null));
+                button(box,"Scan computer QR",this::scanComputer);
             });
         });
     }
@@ -141,7 +145,7 @@ public class MainActivity extends Activity {
         save.setOnClickListener(v->{
             try{
                 String label=name.getText().toString().trim();
-                if(label.isEmpty())throw new IllegalArgumentException("Enter a name for this computer");
+                if(label.isEmpty() || label.length()>64)throw new IllegalArgumentException("Enter a computer name of 1–64 characters");
                 JSONObject profile=new JSONObject().put("id",existing==null?UUID.randomUUID().toString():existing.getString("id"))
                     .put("name",label).put("host",host.getText().toString().trim()).put("port",port.getText().toString().trim())
                     .put("token",token.getText().toString().trim()).put("fingerprint",fingerprint.getText().toString().trim());
@@ -159,10 +163,126 @@ public class MainActivity extends Activity {
                 });
             }catch(Exception e){error.setText(e.getMessage());}
         });
+        if(existing!=null)button(box,"Share saved computer by QR",()->shareComputer(existing));
         if(existing!=null)button(box,"Forget computer",()->new AlertDialog.Builder(this)
             .setTitle("Forget "+existing.optString("name")+"?")
             .setMessage("This removes the saved details from this phone. It does not revoke the agent’s access key.")
             .setNegativeButton("Cancel",null).setPositiveButton("Forget",(d,w)->updateProfiles(()->profileStore.remove(existing.getString("id")))).show());
+        button(box,"Back to computers",this::connectionScreen);
+    }
+    private void shareComputer(JSONObject profile){
+        new AlertDialog.Builder(this).setTitle("Share access to "+profile.optString("name")+"?")
+            .setMessage("This QR includes the computer’s access key. Anyone who scans it can manage that computer when it is reachable. Share only with someone you trust. This key does not expire. Revoking it on the agent and restarting the agent removes access for ALL phones using that key.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Show QR",(d,w)->{
+                LinearLayout box=connectionLayout();showingShareQr=true;
+                text(box,"Share "+profile.optString("name"),26);
+                text(box,"On the other phone: open LocalTask → Scan computer QR. Both phones need version 0.3 or later. The receiving phone must be on the computer’s local network to connect.",15);
+                ImageView qr=new ImageView(this);qr.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                int size=Math.min((int)(320*getResources().getDisplayMetrics().density),getResources().getDisplayMetrics().widthPixels-48);
+                box.addView(qr,new LinearLayout.LayoutParams(-1,size));
+                qr.setContentDescription("Private computer access QR code");
+                TextView result=text(box,"Preparing QR…",14);
+                text(box,"This shares the SAVED details. Unsaved edits are not included. The QR is hidden if you leave the app.",14);
+                button(box,"Done",this::connectionScreen);
+                final int epoch=generation;
+                worker.execute(()->{
+                    android.graphics.Bitmap bitmap=null;
+                    try{
+                        com.google.zxing.common.BitMatrix matrix=ProfileQr.encode(profile);
+                        int width=matrix.getWidth();int[] pixels=new int[width*width];
+                        for(int y=0;y<width;y++)for(int x=0;x<width;x++)pixels[y*width+x]=matrix.get(x,y)?0xff000000:0xffffffff;
+                        bitmap=android.graphics.Bitmap.createBitmap(pixels,width,width,android.graphics.Bitmap.Config.ARGB_8888);
+                    }catch(Exception ignored){}
+                    final android.graphics.Bitmap image=bitmap;
+                    runOnUiThread(()->{
+                        if(isDestroyed() || epoch!=generation)return;
+                        if(image==null)result.setText("Could not create this QR. Check the saved name (64 characters maximum) and connection details.");
+                        else{qr.setImageBitmap(image);result.setText("Ready to scan. Keep this code private.");}
+                    });
+                });
+            }).show();
+    }
+    @SuppressWarnings("deprecation")
+    private void scanComputer(){
+        com.journeyapps.barcodescanner.ScanOptions options=new com.journeyapps.barcodescanner.ScanOptions()
+            .setCaptureActivity(QrScanActivity.class).setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
+            .setPrompt("Scan a trusted LocalTask computer QR").setBeepEnabled(false)
+            .setBarcodeImageEnabled(false).setOrientationLocked(false);
+        try{startActivityForResult(options.createScanIntent(this),SCAN_COMPUTER);}
+        catch(android.content.ActivityNotFoundException e){Toast.makeText(this,"Scanner unavailable. You can still add a computer manually.",Toast.LENGTH_LONG).show();}
+    }
+    @Override protected void onActivityResult(int requestCode,int resultCode,android.content.Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode!=SCAN_COMPUTER)return;
+        if(resultCode!=RESULT_OK || data==null){
+            if(data!=null && data.getBooleanExtra(com.google.zxing.client.android.Intents.Scan.MISSING_CAMERA_PERMISSION,false))
+                Toast.makeText(this,"Camera access is needed to scan. Enable it in app permissions, or add the computer manually.",Toast.LENGTH_LONG).show();
+            return;
+        }
+        try{
+            final JSONObject profile=ProfileTransfer.decode(data.getStringExtra(com.google.zxing.client.android.Intents.Scan.RESULT));
+            new AlertDialog.Builder(this).setTitle("Save this computer?")
+                .setMessage(profile.getString("name")+"\n"+profile.getString("host")+":"+profile.getString("port")
+                    +"\n\nCertificate fingerprint:\n"+profile.getString("fingerprint")
+                    +"\n\nOnly save codes from a trusted person. Saving does not connect or run commands. Existing computer entries will not be overwritten.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Save computer",(d,w)->importComputer(profile)).show();
+        }catch(Exception e){new AlertDialog.Builder(this).setTitle("Not a valid LocalTask computer QR")
+            .setMessage("Use Share saved computer by QR in LocalTask 0.3 or later. This code was not saved or opened.").setPositiveButton("OK",null).show();}
+    }
+    private void importComputer(JSONObject profile){
+        final int epoch=generation;
+        worker.execute(()->{
+            String message;
+            try{
+                JSONArray saved=profileStore.load();boolean duplicate=false;
+                for(int i=0;i<saved.length();i++){
+                    JSONObject p=saved.getJSONObject(i);
+                    if(p.optString("host").equals(profile.getString("host")) && p.optString("port").equals(profile.getString("port"))
+                        && p.optString("fingerprint").replace(":", "").equalsIgnoreCase(profile.getString("fingerprint"))
+                        && p.optString("token").equals(profile.getString("token")))duplicate=true;
+                }
+                if(!duplicate)profileStore.save(profile);
+                message=duplicate?"This computer is already saved.":"Computer saved. Tap its name when you want to connect.";
+            }catch(Exception e){message="Could not save the computer. Your existing entries were not replaced.";}
+            final String outcome=message;
+            runOnUiThread(()->{if(!isDestroyed() && epoch==generation){connectionScreen();Toast.makeText(this,outcome,Toast.LENGTH_LONG).show();}});
+        });
+    }
+    private void openGuideLink(String url){
+        try{startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse(url)));}
+        catch(android.content.ActivityNotFoundException e){Toast.makeText(this,"No browser available. Open "+url+" on your computer.",Toast.LENGTH_LONG).show();}
+    }
+    private void guideScreen(){
+        LinearLayout box=connectionLayout();text(box,"Set up a computer",28);
+        text(box,"Install the agent on each computer you want to manage. Your phone and computer must be on the same trusted local network.",16);
+        text(box,"1. Download on your computer",21);text(box,AgentGuide.download(),15);
+        button(box,"Open agent repository",()->openGuideLink(AgentGuide.REPOSITORY));
+        button(box,"Open Python downloads",()->openGuideLink(AgentGuide.PYTHON));
+        text(box,"2. Choose the computer’s operating system",21);
+        for(String os:new String[]{"Mac","Linux","Windows"})button(box,os+" setup",()->platformGuide(os));
+        button(box,"Read full setup and background-service instructions",()->openGuideLink(AgentGuide.README));
+        button(box,"Back to computers",this::connectionScreen);
+    }
+    private void platformGuide(String os){
+        LinearLayout box=connectionLayout();text(box,os+" agent setup",28);
+        text(box,"1. Get the files",21);text(box,AgentGuide.download(),15);
+        button(box,"Open repository",()->openGuideLink(AgentGuide.REPOSITORY));
+        text(box,"2. Find the computer’s local IP",21);text(box,AgentGuide.address(os),15);
+        text(box,"3. Start the agent",21);
+        text(box,"Open "+("Windows".equals(os)?"PowerShell":"Terminal")+" in the extracted agent folder. Run these commands one at a time as your normal user, not as Administrator or root. Replace YOUR_LAN_IP with that computer’s private IPv4 address, such as 192.168.1.20.",15);
+        TextView commands=text(box,AgentGuide.commands(os),14);commands.setTypeface(android.graphics.Typeface.MONOSPACE);commands.setTextIsSelectable(true);
+        text(box,"Run init only for first-time setup. It refuses to overwrite existing credentials. Keep this terminal open while using the agent. If Python is not found, install Python 3.12 first; on some Linux distributions you also need its venv package.",15);
+        text(box,"4. Allow local access",21);
+        text(box,"Allow inbound TCP port 8765 through the computer’s firewall only on your trusted local network. Use private/home network settings where available. Do not forward this port on your router. Guest Wi-Fi can block connections between devices.",15);
+        text(box,"5. Add it in LocalTask",21);
+        text(box,"The pair command prints a fingerprint and token. On this phone choose Add computer, enter a name, the IP and port 8765, then copy those two values exactly. Tap Save and connect. If another phone already manages the computer, use its Share saved computer by QR option and scan it here instead.",15);
+        text(box,"Next time",21);text(box,"From the same agent folder, start it with:",15);
+        TextView restart=text(box,AgentGuide.restart(os),14);restart.setTypeface(android.graphics.Typeface.MONOSPACE);restart.setTextIsSelectable(true);
+        text(box,"Use the same account and configuration folder. Restarting the agent does not change its fingerprint or token. Reserve its IP on your router, or edit the saved IP if it changes. Background startup is optional; the full README has the platform-specific steps.",15);
+        text(box,"Troubleshooting",21);
+        text(box,"Cannot connect: check the agent is running, IP, port, firewall and network. HTTP 401: check the token or copy it again after revocation. Fingerprint mismatch: verify the certificate on the computer before editing the saved fingerprint. Windows termination is forceful and can lose unsaved work.",15);
+        button(box,"Full background-service instructions",()->openGuideLink(AgentGuide.README));
+        button(box,"Choose another operating system",this::guideScreen);
         button(box,"Back to computers",this::connectionScreen);
     }
     private void processScreen(){
@@ -223,6 +343,6 @@ public class MainActivity extends Activity {
         });
     }
     @Override protected void onResume(){super.onResume();active=true;timer.post(poll);}
-    @Override protected void onPause(){active=false;timer.removeCallbacks(poll);super.onPause();}
+    @Override protected void onPause(){active=false;timer.removeCallbacks(poll);if(showingShareQr)connectionScreen();super.onPause();}
     @Override protected void onDestroy(){generation++;worker.shutdownNow();super.onDestroy();}
 }

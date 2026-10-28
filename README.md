@@ -1,4 +1,4 @@
-# LocalTask — local-network prototype 0.2.3
+# LocalTask — local-network prototype 0.3
 
 An Android remote process manager with a Python agent for Linux, Windows and macOS.
 This is source code for a first development milestone, not a packaged or production-ready app.
@@ -91,7 +91,7 @@ Choose **Add computer**, give it a name (for example “My Mac”), and enter it
 
 All profile fields are encrypted using AES-GCM with a key in Android Keystore. The app disables screenshots, backups, and autofill/view-state saving for credential fields, and pauses polling when backgrounded. Credentials survive normal app updates signed with the same key. Uninstalling the app or clearing app data removes saved profiles. If the encryption key is lost or data cannot be decrypted, the app reports the problem instead of overwriting profiles; **Forget all saved computers** offers explicit recovery. No biometric prompt is required for reconnecting.
 
-Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; this release is version 0.2.3 (version code 5).
+Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; this release is version 0.3 (version code 6).
 
 Target SDK 35 is intentionally pinned for this initial development build. Before publishing or raising the target SDK, check current Android local-network permissions and Play requirements.
 
@@ -197,6 +197,25 @@ The selected artwork was created with the built-in image-generation tool. Design
 
 Resource XML and references were checked; launcher rendering on an Android device still needs verification. Rebuild and install over the existing app with the same signing key to retain saved profiles. If the launcher caches the previous icon, restart the launcher or phone rather than uninstalling the app.
 
+### QR sharing and in-app agent setup (0.3)
+
+**Send a computer:** on Your computers, tap **Edit / forget** for the saved computer, then **Share saved computer by QR**. Confirm the access warning to display the code. Unsaved edits are not included. The QR is hidden if the app is backgrounded; screenshots remain disabled. Repeat for additional computers.
+
+**Receive a computer:** on a second phone with LocalTask 0.3 or later, tap **Scan computer QR**, allow camera access, scan the first phone's screen, review the name/address/fingerprint, then tap **Save computer**. Import does not connect or issue commands. Exact duplicate connection credentials are skipped. Differing profiles create new entries with local IDs instead of overwriting existing entries. A newly imported computer uses the receiving phone's encrypted profile storage. If camera permission is denied, it can be enabled through Android app settings; manual entry remains available.
+
+A QR contains the computer's long-lived access token and certificate fingerprint. It is a credential, not a public invitation or an expiring one-time code. Anyone who scans it can manage that computer when reachable. The receiving phone must still be on the trusted local network. No cloud upload or gallery export is performed. Camera frames are decoded on-device and barcode images are not saved. Revoke on the agent and restart it to invalidate the shared token; **all phones using that token must then be updated**. Editing or removing a profile on one phone does not change another phone's copy. Per-device permissions and revocation are future work.
+
+**Agent setup guide:** the home screen now contains **Agent setup guide**, with offline Mac, Linux and Windows pages explaining where to obtain the code, Python setup, how to find the local IP, first-run commands, pairing, firewall configuration, subsequent starts and troubleshooting. It links to this repository, Python downloads and the full README. Because the repository is private, downloaders need a GitHub account with repository access, or source files supplied by the owner. QR access to a running agent does not grant GitHub access. No prebuilt desktop installers are offered or implied.
+
+Validation: nine JVM tests passed, including actual QR pixel encoding/decoding, Unicode and credential round trips, local-ID generation, invalid/missing fields, public-address rejection, malformed/oversized inputs and unsupported versions. Production Java sources compiled against the Android API and ZXing jars; manifest XML parsed. A full Gradle APK build, camera permission flow, physical phone-to-phone scanning and tutorial layout still require device testing. No agent update is needed.
+
+To rerun the new tests with Gradle:
+
+```sh
+cd android
+./gradlew testDebugUnitTest
+```
+
 ## Architecture and room to expand
 
 Android UI → `AgentClient` → pinned HTTPS → `/v1` agent API → `Processes` → operating system.
@@ -208,7 +227,7 @@ Android UI → `AgentClient` → pinned HTTPS → `/v1` agent API → `Processes
 Next milestones:
 
 1. Verify a real Android-to-computer connection and build/install workflow.
-2. Add QR pairing, per-device credentials/revocation and connection discovery.
+2. Add QR provisioning directly from agents, per-device credentials/revocation and connection discovery.
 3. Add incremental list updates, better UI state restoration and richer command outcomes.
 4. Package and sign desktop installers; verify service lifecycle across all three OSes.
 5. Add remote access through a private VPN first, or an outbound relay with explicit device identity and authorization. Keep the process API; extend the transport and authentication layers. Do not publish this prototype's port to the internet.
@@ -224,3 +243,6 @@ Before a broader release: independent security review, per-device authorization,
 - Android Keystore AES-GCM reference: https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec
 
 - Edge-to-edge and window insets: https://developer.android.com/develop/ui/views/layout/edge-to-edge
+
+- QR scanner library: https://github.com/journeyapps/zxing-android-embedded
+- QR encoding/decoding: https://github.com/zxing/zxing
