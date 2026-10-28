@@ -1,7 +1,9 @@
-# LocalTask — local-network prototype 0.3
+# LocalTask — local-network prototype 0.3.1
 
 An Android remote process manager with a Python agent for Linux, Windows and macOS.
 This is source code for a first development milestone, not a packaged or production-ready app.
+
+Version 0.3.1 fixes a crash when opening **Scan computer QR** by explicitly including AndroidX Core in the app. Pull the update, sync Gradle, and rebuild/install over the existing app with the same signing key to retain saved computers.
 
 ## What this version does
 
