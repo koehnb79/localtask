@@ -1,10 +1,11 @@
-# LocalTask — local-network prototype 0.1
+# LocalTask — local-network prototype 0.2
 
 An Android remote process manager with a Python agent for Linux, Windows and macOS.
 This is source code for a first development milestone, not a packaged or production-ready app.
 
 ## What this version does
 
+- Saves named computer profiles with encrypted credentials on Android; tap a computer to connect.
 - Connects to one computer at a time by private IPv4 address; switch computers by disconnecting.
 - Refreshes processes every three seconds while the Android screen is active.
 - Displays name, PID, owner, resident memory and sampled CPU usage; search and sort.
@@ -44,6 +45,8 @@ Replace `192.168.1.20` with that computer's actual local IPv4 address. `--host` 
 
 The `pair` command displays `fingerprint` and `token`. Copy these directly from your computer into the app. This is manual provisioning using a long-lived secret; it is **not yet a one-time pairing exchange**. Anyone holding the token and fingerprint can access this agent if they can reach it. Do not send credentials in screenshots or commit them to source control.
 
+**Credentials persist across agent restarts.** `init` creates the certificate and token once and refuses to overwrite an existing configuration. `serve` only reads them; `pair` only displays them. Use the same user account and `--config` directory each time. `revoke` explicitly changes only the token; replacing the certificate changes the fingerprint.
+
 Configuration is in your home directory's `.localtask` folder. Unix files are created with owner-only permissions. On Windows, verify the folder's Security properties limit access to your account and required system administrators. Keep the private key and token private.
 
 Allow inbound TCP port 8765 on your computer's firewall **only from your trusted local subnet and only on the private/home network profile**. Do not forward the port on your router. Being on Wi-Fi alone does not guarantee reachability: guest networks often isolate devices. These controls, plus binding to the LAN address, define this prototype's local deployment; the agent does not independently restrict every incoming source address.
@@ -82,7 +85,13 @@ Then open `android` in Android Studio, let dependencies sync, and use Run with y
 
 On Windows use `gradlew.bat assembleDebug`. The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Android Studio can install it on your connected phone. Dependency downloads require internet during setup; app-to-agent operation does not require cloud services.
 
-Enter the computer IP, port, certificate fingerprint and access key. Credentials stay only in memory. Rotation, app recreation or closing the app requires reconnecting; multiple saved profiles and encrypted credential storage are future work. The app disables screenshots and Android backups, and pauses polling when backgrounded.
+Choose **Add computer**, give it a name (for example “My Mac”), and enter its IP, port, certificate fingerprint and access key. Tap **Save and connect**. After closing/reopening the app or rebooting your phone, tap that computer on **Your computers** to reconnect. Profiles are saved after input validation, even if the computer is offline; a saved profile is not proof that a connection succeeded.
+
+**Edit / forget** lets you change an IP address or update credentials after an explicit agent rotation. Forgetting a profile removes it from this phone; it does not revoke the agent token. The app never silently accepts a changed certificate fingerprint. A reserved IP on your router helps avoid address changes.
+
+All profile fields are encrypted using AES-GCM with a key in Android Keystore. The app disables screenshots, backups, and autofill/view-state saving for credential fields, and pauses polling when backgrounded. Credentials survive normal app updates signed with the same key. Uninstalling the app or clearing app data removes saved profiles. If the encryption key is lost or data cannot be decrypted, the app reports the problem instead of overwriting profiles; **Forget all saved computers** offers explicit recovery. No biometric prompt is required for reconnecting.
+
+Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; this release is version 0.2 (version code 2).
 
 Target SDK 35 is intentionally pinned for this initial development build. Before publishing or raising the target SDK, check current Android local-network permissions and Play requirements.
 
@@ -150,7 +159,17 @@ Tests cover missing/wrong credentials, invalid commands, protected processes, ow
 
 Two additional tests enumerate real processes and terminate only a child process spawned by the test. They automatically skip if the runtime lacks a usable process namespace.
 
-Development environment result: **10 passed, 2 skipped**. The two live process tests were skipped because this execution environment cannot resolve its own PID through `/proc`. This is not evidence of live Linux process management working here. Android compilation/device operation, Windows/macOS behavior, background-service installation and the full phone-to-computer path remain unverified. Run the tests on your computer before enabling background operation.
+Initial version 0.1 development result: **10 passed, 2 skipped**. The two live process tests were skipped because this execution environment cannot resolve its own PID through `/proc`. This is not evidence of live Linux process management working here. Android compilation/device operation, Windows/macOS behavior, background-service installation and the full phone-to-computer path remain unverified. Run the tests on your computer before enabling background operation.
+
+### Saved-profile validation (0.2)
+
+The user reported successful macOS operation of the original version. The new Android saved-profile flow still needs a device run. Device tests in `ProfileStoreTest` use a separate test-only preferences file and Keystore alias; they cover reload after store recreation, editing/deletion, encrypted-at-rest contents, tamper detection, missing-key recovery and preserving data on load failure. Run from `android` with an emulator or device attached:
+
+```sh
+./gradlew connectedDebugAndroidTest
+```
+
+Version 0.2 validation: **12 agent tests passed, 1 skipped** (the runtime could not expose a live child PID). This includes a new check that credentials are identical when read from separate agent processes. All three Android production Java sources compiled against Robolectric’s Android 15 API implementation using the Eclipse Java compiler in Java 8 compatibility mode. This is a source/type check, not a Gradle APK build. Device-test sources passed a Java syntax check; the instrumentation tests could not be executed here because no Android SDK/emulator is available. Manual checks: save two computers; force-close/reopen the app; connect to each; edit only one IP; forget one and verify the other remains; restart the Mac agent and reconnect without re-entering credentials. Agent credentials are unchanged by this update.
 
 ## Architecture and room to expand
 
@@ -163,7 +182,7 @@ Android UI → `AgentClient` → pinned HTTPS → `/v1` agent API → `Processes
 Next milestones:
 
 1. Verify a real Android-to-computer connection and build/install workflow.
-2. Add encrypted saved computer profiles, QR pairing, per-device credentials/revocation and connection discovery.
+2. Add QR pairing, per-device credentials/revocation and connection discovery.
 3. Add incremental list updates, better UI state restoration and richer command outcomes.
 4. Package and sign desktop installers; verify service lifecycle across all three OSes.
 5. Add remote access through a private VPN first, or an outbound relay with explicit device identity and authorization. Keep the process API; extend the transport and authentication layers. Do not publish this prototype's port to the internet.
@@ -175,3 +194,5 @@ Before a broader release: independent security review, per-device authorization,
 - Android build compatibility: https://developer.android.com/build/releases/agp-8-9-0-release-notes
 - Process API and platform behavior: https://psutil.io/api/
 - PID reuse handling: https://psutil.io/faq/
+
+- Android Keystore AES-GCM reference: https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec

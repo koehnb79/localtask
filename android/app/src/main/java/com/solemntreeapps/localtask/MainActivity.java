@@ -13,6 +13,7 @@ public class MainActivity extends Activity {
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final Handler timer=new Handler(Looper.getMainLooper());
     private AgentClient client;
+    private ProfileStore profileStore;
     private TextView status;
     private EditText query;
     private ListView list;
@@ -24,6 +25,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state){super.onCreate(state);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);
+        profileStore = new ProfileStore(this);
         connectionScreen();
     }
     private LinearLayout layout(){
@@ -31,21 +33,101 @@ public class MainActivity extends Activity {
         setContentView(box);return box;
     }
     private TextView text(LinearLayout box,String value,int size){TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setPadding(0,8,0,8);box.addView(t);return t;}
-    private EditText input(LinearLayout box,String hint,String value){EditText e=new EditText(this);e.setHint(hint);e.setText(value);e.setSingleLine(true);box.addView(e);return e;}
+    private EditText input(LinearLayout box,String hint,String value){EditText e=new EditText(this);e.setSaveEnabled(false);e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);e.setHint(hint);e.setText(value);e.setSingleLine(true);box.addView(e);return e;}
     private void button(LinearLayout box,String label,Runnable action){Button b=new Button(this);b.setText(label);box.addView(b);b.setOnClickListener(v->action.run());}
+    private LinearLayout connectionLayout(){
+        generation++;client=null;rows.clear();visible.clear();list=null;query=null;
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,32,24,16);
+        scroll.addView(box);setContentView(scroll);return box;
+    }
     private void connectionScreen(){
-        generation++;client=null;rows.clear();visible.clear();
-        LinearLayout box=layout();text(box,"LocalTask",30);text(box,"Connect to your computer",20);
-        text(box,"Run the agent’s pair command on your computer. Enter its local IP and copy the credentials below. Credentials stay in memory for this session.",15);
-        EditText host=input(box,"Computer IP · 192.168.1.20","");
-        EditText port=input(box,"Port","8765");port.setInputType(2);
-        EditText fingerprint=input(box,"SHA-256 certificate fingerprint","");
-        EditText token=input(box,"Access key","");token.setInputType(129);
-        TextView error=text(box,"",14);
-        button(box,"Connect",()->{
-            try{client=new AgentClient(host.getText().toString().trim(),port.getText().toString().trim(),token.getText().toString().trim(),fingerprint.getText().toString().trim());processScreen();}
-            catch(Exception e){error.setText(e.getMessage());}
+        LinearLayout box=connectionLayout();text(box,"Your computers",30);
+        TextView note=text(box,"Loading saved computers…",15);
+        final int epoch=generation;
+        worker.execute(()->{
+            JSONArray saved=null;
+            try{saved=profileStore.load();}catch(Exception ignored){}
+            final JSONArray profiles=saved;
+            runOnUiThread(()->{
+                if(isDestroyed() || epoch!=generation)return;
+                if(profiles==null){
+                    note.setText("Saved computers could not be decrypted. They have not been changed. Retry, or forget them and add your computers again.");
+                    button(box,"Retry",this::connectionScreen);
+                    button(box,"Forget all saved computers",()->new AlertDialog.Builder(this)
+                        .setTitle("Forget all computers on this phone?")
+                        .setMessage("You will need to enter their connection details again. The agents’ credentials will not change.")
+                        .setNegativeButton("Cancel",null).setPositiveButton("Forget all",(d,w)->updateProfiles(()->profileStore.clear())).show());
+                    return;
+                }
+                note.setText(profiles.length()==0?"Add your first computer. Its connection details will be saved securely on this phone.":"Tap a computer to connect. Connection details are saved securely on this phone.");
+                for(int i=0;i<profiles.length();i++){
+                    JSONObject profile=profiles.optJSONObject(i);
+                    if(profile==null)continue;
+                    button(box,profile.optString("name")+" · "+profile.optString("host"),()->connectProfile(profile));
+                    button(box,"Edit / forget "+profile.optString("name"),()->editProfile(profile));
+                }
+                button(box,"Add computer",()->editProfile(null));
+            });
         });
+    }
+    private void connectProfile(JSONObject profile){
+        try{
+            client=new AgentClient(profile.getString("host"),profile.getString("port"),profile.getString("token"),profile.getString("fingerprint"));
+            generation++;processScreen();
+        }catch(Exception e){Toast.makeText(this,"Invalid connection details. Edit this saved computer.",Toast.LENGTH_LONG).show();}
+    }
+    private interface ProfileChange { void run() throws Exception; }
+    private void updateProfiles(ProfileChange change){
+        final int epoch=generation;
+        worker.execute(()->{
+            boolean success;
+            try{change.run();success=true;}catch(Exception e){success=false;}
+            final boolean ok=success;
+            runOnUiThread(()->{
+                if(isDestroyed() || epoch!=generation)return;
+                if(ok)connectionScreen();
+                else Toast.makeText(this,"Could not update saved computers. Please try again.",Toast.LENGTH_LONG).show();
+            });
+        });
+    }
+    private void editProfile(JSONObject existing){
+        LinearLayout box=connectionLayout();text(box,existing==null?"Add computer":"Edit computer",28);
+        text(box,"Enter the details shown by the agent’s pair command. Server restarts keep the same fingerprint and access key.",15);
+        EditText name=input(box,"Computer name",existing==null?"":existing.optString("name"));
+        EditText host=input(box,"Computer IP · 192.168.1.20",existing==null?"":existing.optString("host"));
+        EditText port=input(box,"Port",existing==null?"8765":existing.optString("port"));port.setInputType(2);
+        EditText fingerprint=input(box,"SHA-256 certificate fingerprint",existing==null?"":existing.optString("fingerprint"));
+        EditText token=input(box,"Access key",existing==null?"":existing.optString("token"));token.setInputType(129);
+        TextView error=text(box,"",14);
+        Button save=new Button(this);save.setText("Save and connect");box.addView(save);
+        save.setOnClickListener(v->{
+            try{
+                String label=name.getText().toString().trim();
+                if(label.isEmpty())throw new IllegalArgumentException("Enter a name for this computer");
+                JSONObject profile=new JSONObject().put("id",existing==null?UUID.randomUUID().toString():existing.getString("id"))
+                    .put("name",label).put("host",host.getText().toString().trim()).put("port",port.getText().toString().trim())
+                    .put("token",token.getText().toString().trim()).put("fingerprint",fingerprint.getText().toString().trim());
+                new AgentClient(profile.getString("host"),profile.getString("port"),profile.getString("token"),profile.getString("fingerprint"));
+                save.setEnabled(false);error.setText("Saving…");final int epoch=generation;
+                worker.execute(()->{
+                    boolean success;
+                    try{profileStore.save(profile);success=true;}catch(Exception e){success=false;}
+                    final boolean ok=success;
+                    runOnUiThread(()->{
+                        if(isDestroyed() || epoch!=generation)return;
+                        if(ok)connectProfile(profile);
+                        else{save.setEnabled(true);error.setText("Could not save this computer. Return to your computers and retry.");}
+                    });
+                });
+            }catch(Exception e){error.setText(e.getMessage());}
+        });
+        if(existing!=null)button(box,"Forget computer",()->new AlertDialog.Builder(this)
+            .setTitle("Forget "+existing.optString("name")+"?")
+            .setMessage("This removes the saved details from this phone. It does not revoke the agent’s access key.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Forget",(d,w)->updateProfiles(()->profileStore.remove(existing.getString("id")))).show());
+        button(box,"Back to computers",this::connectionScreen);
     }
     private void processScreen(){
         LinearLayout box=layout();text(box,"Processes",28);status=text(box,"Connecting…",14);

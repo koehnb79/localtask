@@ -58,7 +58,12 @@ def test_schema_and_protection():
 def test_real_child_stale_identity_then_kill():
     child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
     try:
-        proc = psutil.Process(child.pid)
+        try:
+            proc = psutil.Process(child.pid)
+        except psutil.NoSuchProcess:
+            if child.poll() is None:
+                pytest.skip("Runtime cannot expose the live child PID through its process namespace")
+            raise
         client = TestClient(make_app(TOKEN))
         body = dict(pid=child.pid, created=proc.create_time()+100, action='kill')
         assert client.post('/v1/commands', headers=AUTH, json=body).status_code == 409
@@ -161,3 +166,15 @@ def test_command_outcomes(monkeypatch,case,expected):
     assert result.status_code==expected
     if case=="ok":proc.kill.assert_called_once()
     if case in ("stale","missing"):proc.kill.assert_not_called()
+
+
+def test_pair_credentials_survive_separate_processes(tmp_path):
+    import json
+    script = str(Path(__file__).resolve().parents[1] / 'agent.py')
+    subprocess.run([sys.executable, script, 'init', '--config', str(tmp_path/'persistent')],
+                   check=True, capture_output=True)
+    command = [sys.executable, script, 'pair', '--config', str(tmp_path/'persistent')]
+    first = json.loads(subprocess.check_output(command))
+    second = json.loads(subprocess.check_output(command))
+    assert first == second
+    assert first == credentials(tmp_path/'persistent')
