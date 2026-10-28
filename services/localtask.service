@@ -1,0 +1,15 @@
+# User service: replace paths and IP before installing.
+[Unit]
+Description=LocalTask process management agent
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/ABSOLUTE/localtask/agent/.venv/bin/python /ABSOLUTE/localtask/agent/agent.py serve --config /HOME/.localtask --host 192.168.1.20
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
