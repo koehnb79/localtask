@@ -25,12 +25,44 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state){super.onCreate(state);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,WindowManager.LayoutParams.FLAG_SECURE);
+        if(Build.VERSION.SDK_INT>=30){
+            // Own the safe-area padding instead of relying on legacy decor fitting.
+            getWindow().setDecorFitsSystemWindows(false);
+            if(Build.VERSION.SDK_INT<35){
+                getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
+                getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+            }
+            WindowInsetsController controller=getWindow().getInsetsController();
+            if(controller!=null){
+                int lightBars=WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                controller.setSystemBarsAppearance(lightBars,lightBars);
+            }
+        }
         profileStore = new ProfileStore(this);
         connectionScreen();
     }
+    private void setScreenContent(View content){
+        // Keep safe-area padding outside the scrollable content on every screen.
+        FrameLayout safeArea=new FrameLayout(this);
+        safeArea.addView(content,new FrameLayout.LayoutParams(-1,-1));
+        if(Build.VERSION.SDK_INT>=30){
+            safeArea.setOnApplyWindowInsetsListener((view,insets)->{
+                android.graphics.Insets safe=insets.getInsets(
+                    WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()
+                    | WindowInsets.Type.ime());
+                // Assign absolute values: repeated dispatch must not accumulate padding.
+                view.setPadding(safe.left,safe.top,safe.right,safe.bottom);
+                return WindowInsets.CONSUMED;
+            });
+        }
+        // Android 8–10 retain the platform's decor fitting and keyboard resize behavior.
+        setContentView(safeArea);
+        safeArea.post(safeArea::requestApplyInsets);
+    }
     private LinearLayout layout(){
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,32,24,16);
-        setContentView(box);return box;
+        setScreenContent(box);return box;
     }
     private TextView text(LinearLayout box,String value,int size){TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setPadding(0,8,0,8);box.addView(t);return t;}
     private EditText input(LinearLayout box,String hint,String value){EditText e=new EditText(this);e.setSaveEnabled(false);e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);e.setHint(hint);e.setText(value);e.setSingleLine(true);box.addView(e);return e;}
@@ -40,7 +72,7 @@ public class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);
         scroll.setFillViewport(true);
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,32,24,16);
-        scroll.addView(box);setContentView(scroll);return box;
+        scroll.addView(box);setScreenContent(scroll);return box;
     }
     private void connectionScreen(){
         LinearLayout box=connectionLayout();text(box,"Your computers",30);

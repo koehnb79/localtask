@@ -1,4 +1,4 @@
-# LocalTask — local-network prototype 0.2
+# LocalTask — local-network prototype 0.2.1
 
 An Android remote process manager with a Python agent for Linux, Windows and macOS.
 This is source code for a first development milestone, not a packaged or production-ready app.
@@ -91,7 +91,7 @@ Choose **Add computer**, give it a name (for example “My Mac”), and enter it
 
 All profile fields are encrypted using AES-GCM with a key in Android Keystore. The app disables screenshots, backups, and autofill/view-state saving for credential fields, and pauses polling when backgrounded. Credentials survive normal app updates signed with the same key. Uninstalling the app or clearing app data removes saved profiles. If the encryption key is lost or data cannot be decrypted, the app reports the problem instead of overwriting profiles; **Forget all saved computers** offers explicit recovery. No biometric prompt is required for reconnecting.
 
-Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; this release is version 0.2 (version code 2).
+Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; this release is version 0.2.1 (version code 3).
 
 Target SDK 35 is intentionally pinned for this initial development build. Before publishing or raising the target SDK, check current Android local-network permissions and Play requirements.
 
@@ -163,13 +163,19 @@ Initial version 0.1 development result: **10 passed, 2 skipped**. The two live p
 
 ### Saved-profile validation (0.2)
 
-The user reported successful macOS operation of the original version. The new Android saved-profile flow still needs a device run. Device tests in `ProfileStoreTest` use a separate test-only preferences file and Keystore alias; they cover reload after store recreation, editing/deletion, encrypted-at-rest contents, tamper detection, missing-key recovery and preserving data on load failure. Run from `android` with an emulator or device attached:
+The user reported successful macOS and Linux operation after the saved-profile update. Windows remains untested. Device tests in `ProfileStoreTest` use a separate test-only preferences file and Keystore alias; they cover reload after store recreation, editing/deletion, encrypted-at-rest contents, tamper detection, missing-key recovery and preserving data on load failure. Run from `android` with an emulator or device attached:
 
 ```sh
 ./gradlew connectedDebugAndroidTest
 ```
 
 Version 0.2 validation: **12 agent tests passed, 1 skipped** (the runtime could not expose a live child PID). This includes a new check that credentials are identical when read from separate agent processes. All three Android production Java sources compiled against Robolectric’s Android 15 API implementation using the Eclipse Java compiler in Java 8 compatibility mode. This is a source/type check, not a Gradle APK build. Device-test sources passed a Java syntax check; the instrumentation tests could not be executed here because no Android SDK/emulator is available. Manual checks: save two computers; force-close/reopen the app; connect to each; edit only one IP; forget one and verify the other remains; restart the Mac agent and reconnect without re-entering credentials. Agent credentials are unchanged by this update.
+
+### System-bar layout fix (0.2.1)
+
+Every activity screen now uses one shared safe-area container. On Android 11+ it applies the current system-bar, display-cutout and keyboard insets as padding outside the content, including outside the connection screens' scroll view. Padding is reassigned on each inset update, so it does not accumulate when switching screens or showing/hiding the keyboard. Android 8–10 retain the platform's existing decor fitting. The light app theme requests dark system-bar icons.
+
+The fix addresses the reported status-bar overlap on Android 17 without opting out of edge-to-edge layout or using a guessed status-bar height. Java source/type compilation passed against the Android 15 API implementation; Android 17 visual/device verification is still pending. Check the saved-computer list, add/edit form and process list in portrait and landscape, with the keyboard open and closed, using gesture or three-button navigation. Update the existing app with the same signing key to retain saved computers.
 
 ## Architecture and room to expand
 
@@ -196,3 +202,5 @@ Before a broader release: independent security review, per-device authorization,
 - PID reuse handling: https://psutil.io/faq/
 
 - Android Keystore AES-GCM reference: https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec
+
+- Edge-to-edge and window insets: https://developer.android.com/develop/ui/views/layout/edge-to-edge
