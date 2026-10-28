@@ -32,12 +32,6 @@ public class MainActivity extends Activity {
                 getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
                 getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
             }
-            WindowInsetsController controller=getWindow().getInsetsController();
-            if(controller!=null){
-                int lightBars=WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                    | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-                controller.setSystemBarsAppearance(lightBars,lightBars);
-            }
         }
         profileStore = new ProfileStore(this);
         connectionScreen();
@@ -58,6 +52,16 @@ public class MainActivity extends Activity {
         }
         // Android 8–10 retain the platform's decor fitting and keyboard resize behavior.
         setContentView(safeArea);
+        // PhoneWindow.getInsetsController() dereferences its decor view internally.
+        // It is only safe after setContentView has installed that decor.
+        if(Build.VERSION.SDK_INT>=30){
+            WindowInsetsController controller=getWindow().getInsetsController();
+            if(controller!=null){
+                int lightBars=WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                controller.setSystemBarsAppearance(lightBars,lightBars);
+            }
+        }
         safeArea.post(safeArea::requestApplyInsets);
     }
     private LinearLayout layout(){

@@ -1,4 +1,4 @@
-# LocalTask — local-network prototype 0.2.1
+# LocalTask — local-network prototype 0.2.2
 
 An Android remote process manager with a Python agent for Linux, Windows and macOS.
 This is source code for a first development milestone, not a packaged or production-ready app.
@@ -91,7 +91,7 @@ Choose **Add computer**, give it a name (for example “My Mac”), and enter it
 
 All profile fields are encrypted using AES-GCM with a key in Android Keystore. The app disables screenshots, backups, and autofill/view-state saving for credential fields, and pauses polling when backgrounded. Credentials survive normal app updates signed with the same key. Uninstalling the app or clearing app data removes saved profiles. If the encryption key is lost or data cannot be decrypted, the app reports the problem instead of overwriting profiles; **Forget all saved computers** offers explicit recovery. No biometric prompt is required for reconnecting.
 
-Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; this release is version 0.2.1 (version code 3).
+Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; this release is version 0.2.2 (version code 4).
 
 Target SDK 35 is intentionally pinned for this initial development build. Before publishing or raising the target SDK, check current Android local-network permissions and Play requirements.
 
@@ -176,6 +176,18 @@ Version 0.2 validation: **12 agent tests passed, 1 skipped** (the runtime could 
 Every activity screen now uses one shared safe-area container. On Android 11+ it applies the current system-bar, display-cutout and keyboard insets as padding outside the content, including outside the connection screens' scroll view. Padding is reassigned on each inset update, so it does not accumulate when switching screens or showing/hiding the keyboard. Android 8–10 retain the platform's existing decor fitting. The light app theme requests dark system-bar icons.
 
 The fix addresses the reported status-bar overlap on Android 17 without opting out of edge-to-edge layout or using a guessed status-bar height. Java source/type compilation passed against the Android 15 API implementation; Android 17 visual/device verification is still pending. Check the saved-computer list, add/edit form and process list in portrait and landscape, with the keyboard open and closed, using gesture or three-button navigation. Update the existing app with the same signing key to retain saved computers.
+
+### Startup crash fix (0.2.2)
+
+Version 0.2.1 requested the window inset controller before installing its content view. Android's PhoneWindow implementation dereferences the decor view inside that call, so checking the returned controller for null does not protect against a missing decor view. Version 0.2.2 requests the controller only after `setContentView` installs the decor. The system-bar/cutout/keyboard padding remains in place; profile storage is unchanged.
+
+Added `MainActivityLaunchTest` to launch the real activity and exercise initial inset dispatch. Run it on a connected emulator/device with:
+
+```sh
+./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.solemntreeapps.localtask.MainActivityLaunchTest
+```
+
+The test does not clear or edit saved computers. Java production-source compilation passed; the launch regression test and Android 17 runtime check still require a connected device. Install the update with the same signing key without uninstalling to preserve profiles.
 
 ## Architecture and room to expand
 
