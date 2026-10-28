@@ -1,4 +1,4 @@
-# LocalTask — local-network prototype 0.2.2
+# LocalTask — local-network prototype 0.2.3
 
 An Android remote process manager with a Python agent for Linux, Windows and macOS.
 This is source code for a first development milestone, not a packaged or production-ready app.
@@ -91,7 +91,7 @@ Choose **Add computer**, give it a name (for example “My Mac”), and enter it
 
 All profile fields are encrypted using AES-GCM with a key in Android Keystore. The app disables screenshots, backups, and autofill/view-state saving for credential fields, and pauses polling when backgrounded. Credentials survive normal app updates signed with the same key. Uninstalling the app or clearing app data removes saved profiles. If the encryption key is lost or data cannot be decrypted, the app reports the problem instead of overwriting profiles; **Forget all saved computers** offers explicit recovery. No biometric prompt is required for reconnecting.
 
-Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; this release is version 0.2.2 (version code 4).
+Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; this release is version 0.2.3 (version code 5).
 
 Target SDK 35 is intentionally pinned for this initial development build. Before publishing or raising the target SDK, check current Android local-network permissions and Play requirements.
 
@@ -188,6 +188,14 @@ Added `MainActivityLaunchTest` to launch the real activity and exercise initial 
 ```
 
 The test does not clear or edit saved computers. Java production-source compilation passed; the launch regression test and Android 17 runtime check still require a connected device. Install the update with the same signing key without uninstalling to preserve profiles.
+
+### Launcher icon (0.2.3)
+
+LocalTask now uses the mint connected-computer tree artwork as its Android launcher icon. The original full-color image is stored at `android/app/src/main/res/drawable-nodpi/localtask_icon.png`. Adaptive-icon resources provide a navy background and inset the artwork by 16% on each side for circular and rounded launcher masks. Both normal and round manifest icon entries use the adaptive resource. Android 8.0 is the app's minimum supported version, so all supported devices can load the API 26 adaptive icon.
+
+The selected artwork was created with the built-in image-generation tool. Design prompt: “A clean mint connected-computer tree symbol on a midnight navy background, no text, readable at launcher-icon sizes.” Experimental transparent exports were not included. This version uses the full-color icon; a custom monochrome themed-icon layer is not included.
+
+Resource XML and references were checked; launcher rendering on an Android device still needs verification. Rebuild and install over the existing app with the same signing key to retain saved profiles. If the launcher caches the previous icon, restart the launcher or phone rather than uninstalling the app.
 
 ## Architecture and room to expand
 
