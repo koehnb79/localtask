@@ -1,9 +1,31 @@
-# LocalTask — local-network prototype 0.3.1
+# LocalTask — local-network prototype 0.4
 
 An Android remote process manager with a Python agent for Linux, Windows and macOS.
 This is source code for a first development milestone, not a packaged or production-ready app.
 
 Version 0.3.1 fixes a crash when opening **Scan computer QR** by explicitly including AndroidX Core in the app. Pull the update, sync Gradle, and rebuild/install over the existing app with the same signing key to retain saved computers.
+
+## Computer actions (0.4)
+
+Connect to a computer, tap **Computer actions**, choose **Log off**, **Shut down**, or **Restart**, and review the named computer, target session, and warning before confirming. Update **both the Android app and the agent folder** (including `computer_actions.py`), then restart the agent. No new Python dependencies are needed. Keep the existing `~/.localtask` directory: do not run `init` again. Saved credentials and QR profiles remain valid. Older agents continue to support process management and show an update message for computer actions.
+
+These controls use the existing paired access key. Anyone you share the key/QR with can also request computer actions on an updated agent. Shutdown and restart affect the entire computer and other signed-in users. Log off is limited to the desktop session verified by the agent; the phone cannot supply a username, session ID, or command.
+
+| Platform | Log off | Shut down / Restart |
+| --- | --- | --- |
+| Linux | Requires systemd-logind and an active local X11/Wayland session owned by the agent user. `loginctl terminate-session` ends that session's processes **without save prompts**. SSH/text sessions and other users' sessions are refused. | Uses systemd 248+ `systemctl --no-ask-password --check-inhibitors=yes poweroff/reboot`. Local logind/polkit policy must authorize the account. Blocking inhibitors are respected. |
+| macOS | Requires the agent user to own the foreground console desktop. Sends a System Events logout request. | Requests System Events shutdown/restart from that same foreground user's agent. macOS may require Automation permission for the launcher to control System Events. Local save/permission dialogs can block or cancel actions. |
+| Windows | Signs out the agent's own interactive session. Unavailable when the agent is running as a Windows service in session 0. | Uses the Windows shutdown tool with `/t 0` and **without `/f`**. The account needs the **Shut down the system** user right. Applications may block the request. |
+
+Keep the agent as a standard desktop user. LocalTask never invokes sudo, requests elevation, changes OS security policy, bypasses shutdown inhibitors, or automatically installs permission grants. If denied, inspect the computer's local permissions; a Linux user service may have different authorization from an interactive terminal. No blanket passwordless sudo rule is required or recommended. On Mac, check **System Settings → Privacy & Security → Automation** and any on-screen prompts. Windows service accounts may lack shutdown rights even when a desktop user has them.
+
+The final confirmation expires after 60 seconds and can be used only once. The agent rechecks the session before dispatch, rejects overlapping actions, and applies a one-minute cooldown after dispatch. It does not queue actions for the next startup. Preparing/cancelling a confirmation never runs a command. A successful response means the OS request was sent, **not** that logout/shutdown/restart completed. If the connection ends or the OS times out, the app reports an uncertain outcome and does not automatically retry. Check the computer before sending another request.
+
+Logging off can stop the user agent. After restarting, it may not be reachable until someone signs in and its service starts again. A powered-off computer cannot be turned back on through these controls; Wake-on-LAN is not implemented. Save work before confirming any action.
+
+Protocol: authenticated `GET /v1/computer-actions` lists support and restrictions; `POST /v1/computer-actions/prepare` accepts only `{"action":"logout|shutdown|restart"}` (one literal action) and returns a short-lived confirmation; `POST /v1/computer-actions/confirm` accepts only `{"confirmation":"..."}`. Session targets and executable arguments are resolved locally. Confirmations are stored only in memory and disappear when the agent restarts. Existing process APIs are unchanged.
+
+Validation: automated tests mock all OS action dispatches. They cover authentication, strict request schemas, confirmation expiry/replay, concurrency/cooldown, session ownership, fixed platform commands, rejected requests, and uncertain timeouts. Actual logout/shutdown/restart on physical Windows, Mac, and Linux machines still needs testing after saving work.
 
 ## What this version does
 

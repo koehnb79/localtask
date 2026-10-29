@@ -16,6 +16,7 @@ public class MainActivity extends Activity {
     private ProfileStore profileStore;
     private static final int SCAN_COMPUTER = 0x5152;
     private boolean showingShareQr;
+    private boolean computerActionBusy;
     private TextView status;
     private EditText query;
     private ListView list;
@@ -74,7 +75,7 @@ public class MainActivity extends Activity {
     private EditText input(LinearLayout box,String hint,String value){EditText e=new EditText(this);e.setSaveEnabled(false);e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);e.setHint(hint);e.setText(value);e.setSingleLine(true);box.addView(e);return e;}
     private void button(LinearLayout box,String label,Runnable action){Button b=new Button(this);b.setText(label);box.addView(b);b.setOnClickListener(v->action.run());}
     private LinearLayout connectionLayout(){
-        generation++;client=null;rows.clear();visible.clear();list=null;query=null;showingShareQr=false;
+        generation++;client=null;rows.clear();visible.clear();list=null;query=null;showingShareQr=false;computerActionBusy=false;
         ScrollView scroll=new ScrollView(this);
         scroll.setFillViewport(true);
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(24,32,24,16);
@@ -172,7 +173,7 @@ public class MainActivity extends Activity {
     }
     private void shareComputer(JSONObject profile){
         new AlertDialog.Builder(this).setTitle("Share access to "+profile.optString("name")+"?")
-            .setMessage("This QR includes the computer’s access key. Anyone who scans it can manage that computer when it is reachable. Share only with someone you trust. This key does not expire. Revoking it on the agent and restarting the agent removes access for ALL phones using that key.")
+            .setMessage("This QR includes the computer’s access key. Anyone who scans it can manage processes and request log off, shutdown, or restart on an updated agent when the computer is reachable. Share only with someone you trust. This key does not expire. Revoking it on the agent and restarting the agent removes access for ALL phones using that key.")
             .setNegativeButton("Cancel",null).setPositiveButton("Show QR",(d,w)->{
                 LinearLayout box=connectionLayout();showingShareQr=true;
                 text(box,"Share "+profile.optString("name"),26);
@@ -258,6 +259,7 @@ public class MainActivity extends Activity {
         text(box,"1. Download on your computer",21);text(box,AgentGuide.download(),15);
         button(box,"Open agent repository",()->openGuideLink(AgentGuide.REPOSITORY));
         button(box,"Open Python downloads",()->openGuideLink(AgentGuide.PYTHON));
+        text(box,"Computer actions require LocalTask 0.4 or later on both the phone and computer. Update the entire agent folder, including computer_actions.py, and restart the agent. Keep your existing credentials; do not initialize again.",15);
         text(box,"2. Choose the computer’s operating system",21);
         for(String os:new String[]{"Mac","Linux","Windows"})button(box,os+" setup",()->platformGuide(os));
         button(box,"Read full setup and background-service instructions",()->openGuideLink(AgentGuide.README));
@@ -292,11 +294,12 @@ public class MainActivity extends Activity {
         button(box,"Sort: memory / CPU / name",()->{sort=(sort+1)%3;render();});
         list=new ListView(this);box.addView(list,new LinearLayout.LayoutParams(-1,0,1));
         list.setOnItemClickListener((parent,view,position,id)->confirm(visible.get(position)));
+        button(box,"Computer actions",this::computerActionsMenu);
         button(box,"Disconnect / switch computer",this::connectionScreen);
         refresh();
     }
     private void refresh(){
-        if(!active || client==null || busy)return;
+        if(!active || client==null || busy || computerActionBusy)return;
         busy=true;final AgentClient target=client;final int epoch=generation;
         worker.execute(()->{
             JSONObject data=null;String error=null;
@@ -322,6 +325,80 @@ public class MainActivity extends Activity {
         for(JSONObject p:visible){String cpu=p.isNull("cpu")?"sampling":String.format(Locale.US,"%.1f%%",p.optDouble("cpu"));
             labels.add(p.optString("name")+"  ·  PID "+p.optInt("pid")+"\n"+String.format(Locale.US,"%.1f MB",p.optLong("memory")/1048576.0)+"  ·  CPU "+cpu+"\n"+p.optString("owner")+(p.optBoolean("manageable")?"":" · view only"));}
         list.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,labels));
+    }
+    private boolean currentComputer(AgentClient target,int epoch){
+        return !isDestroyed() && !isFinishing() && client==target && generation==epoch;
+    }
+    private void computerActionsMenu(){
+        if(client==null || computerActionBusy)return;
+        computerActionBusy=true;final AgentClient target=client;final int epoch=generation;
+        Toast.makeText(this,"Checking computer actions…",Toast.LENGTH_SHORT).show();
+        worker.execute(()->{
+            JSONObject data=null;String error=null;
+            try{data=target.computerActions();}
+            catch(AgentClient.AgentException e){error=e.status==404?"Update and restart this computer’s agent to use computer actions (LocalTask 0.4 or later).":e.getMessage();}
+            catch(Exception e){error="Could not contact the computer. No action was sent.";}
+            final JSONObject result=data;final String failure=error;
+            runOnUiThread(()->{
+                if(!currentComputer(target,epoch))return;
+                computerActionBusy=false;
+                if(failure!=null){new AlertDialog.Builder(this).setTitle("Computer actions unavailable").setMessage(failure).setPositiveButton("OK",null).show();return;}
+                JSONArray actions=result.optJSONArray("actions");
+                if(actions==null)return;
+                LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(32,16,32,16);
+                text(box,"Choose an action. Nothing runs until you confirm it on the next screen.",15);
+                ScrollView scroll=new ScrollView(this);scroll.addView(box);
+                AlertDialog menu=new AlertDialog.Builder(this).setTitle(result.optString("computer")+" · Computer actions")
+                    .setView(scroll).setNegativeButton("Cancel",null).create();
+                for(int i=0;i<actions.length();i++){
+                    JSONObject item=actions.optJSONObject(i);if(item==null)continue;
+                    String action=item.optString("action");
+                    if(!Arrays.asList("logout","shutdown","restart").contains(action))continue;
+                    Button choice=new Button(this);choice.setText(item.optString("label"));box.addView(choice);
+                    choice.setEnabled(item.optBoolean("available"));
+                    if(!item.optBoolean("available"))text(box,item.optString("reason"),14);
+                    choice.setOnClickListener(v->{menu.dismiss();prepareComputerAction(target,epoch,action);});
+                }
+                menu.show();
+            });
+        });
+    }
+    private void prepareComputerAction(AgentClient target,int epoch,String action){
+        if(!currentComputer(target,epoch) || computerActionBusy)return;
+        computerActionBusy=true;
+        worker.execute(()->{
+            JSONObject data=null;String error=null;
+            try{data=target.prepareComputerAction(action);}
+            catch(Exception e){error=e instanceof AgentClient.AgentException?e.getMessage():"Could not prepare the request. No action was sent.";}
+            final JSONObject result=data;final String failure=error;
+            runOnUiThread(()->{
+                if(!currentComputer(target,epoch))return;
+                if(failure!=null){computerActionBusy=false;new AlertDialog.Builder(this).setTitle("Action unavailable").setMessage(failure).setPositiveButton("OK",null).show();return;}
+                new AlertDialog.Builder(this).setTitle(result.optString("label")+" "+result.optString("computer")+"?")
+                    .setMessage(result.optString("target")+"\n\n"+result.optString("warning")+"\n\nThis confirmation expires in 60 seconds.")
+                    .setNegativeButton("Cancel",(d,w)->computerActionBusy=false)
+                    .setOnCancelListener(d->computerActionBusy=false)
+                    .setPositiveButton(result.optString("label"),(d,w)->executeComputerAction(target,epoch,result.optString("confirmation")))
+                    .show();
+            });
+        });
+    }
+    private void executeComputerAction(AgentClient target,int epoch,String confirmation){
+        if(!currentComputer(target,epoch))return;
+        // One attempt only. A lost connection may mean the computer is already logging off/shutting down.
+        worker.execute(()->{
+            String message;boolean leave=false;
+            try{message=target.confirmComputerAction(confirmation).getString("message");leave=true;}
+            catch(AgentClient.AgentException e){message=e.getMessage();leave=e.status==504;}
+            catch(Exception e){message="The connection ended before the result could be confirmed. The action may already be underway. Check the computer before sending another request.";leave=true;}
+            final String outcome=message;final boolean disconnect=leave;
+            runOnUiThread(()->{
+                if(!currentComputer(target,epoch))return;
+                computerActionBusy=false;
+                if(disconnect)connectionScreen();
+                new AlertDialog.Builder(this).setTitle("Computer action status").setMessage(outcome).setPositiveButton("OK",null).show();
+            });
+        });
     }
     private void confirm(JSONObject p){
         if(!p.optBoolean("manageable")){new AlertDialog.Builder(this).setMessage("This process is view only.").setPositiveButton("OK",null).show();return;}

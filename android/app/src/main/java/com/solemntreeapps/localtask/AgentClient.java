@@ -45,20 +45,48 @@ public final class AgentClient {
     }
     public JSONObject processes() throws Exception {return request("/v1/processes",null);}
     public JSONObject command(JSONObject body)throws Exception{return request("/v1/commands",body);}
+    public JSONObject computerActions()throws Exception{return request("/v1/computer-actions",null);}
+    public JSONObject prepareComputerAction(String action)throws Exception{
+        return request("/v1/computer-actions/prepare",new JSONObject().put("action",action));
+    }
+    public JSONObject confirmComputerAction(String confirmation)throws Exception{
+        return request("/v1/computer-actions/confirm",new JSONObject().put("confirmation",confirmation));
+    }
+    public static final class AgentException extends java.io.IOException {
+        private static final long serialVersionUID=1L;
+        public final int status;
+        AgentException(int status,String message){super(message);this.status=status;}
+    }
     private JSONObject request(String path,JSONObject body)throws Exception{
         HttpsURLConnection c=(HttpsURLConnection)new URL(base+path).openConnection();
         c.setSSLSocketFactory(sockets);
         // The exact certificate pin authenticates this computer, independent of DHCP hostname/IP.
         c.setHostnameVerifier((host,session)->true);
-        c.setInstanceFollowRedirects(false); c.setConnectTimeout(5000); c.setReadTimeout(8000);
+        c.setInstanceFollowRedirects(false); c.setConnectTimeout(5000);
+        c.setReadTimeout(path.startsWith("/v1/computer-actions")?15000:8000);
         c.setRequestProperty("Authorization","Bearer "+token);
         try {
             if(body!=null){
                 c.setRequestMethod("POST"); c.setDoOutput(true); c.setRequestProperty("Content-Type","application/json");
-                try(java.io.OutputStream out=c.getOutputStream()){out.write(body.toString().getBytes(StandardCharsets.UTF_8));}
+                byte[] payload=body.toString().getBytes(StandardCharsets.UTF_8);
+                c.setFixedLengthStreamingMode(payload.length);
+                try(java.io.OutputStream out=c.getOutputStream()){out.write(payload);}
             }
             int status=c.getResponseCode();
-            if(status!=200) throw new java.io.IOException("Agent returned HTTP "+status+". Check access key, permissions, or refresh the process list.");
+            if(status!=200){
+                String message="Agent returned HTTP "+status+". Check access key, permissions, or refresh the process list.";
+                try(java.io.InputStream in=c.getErrorStream(); java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){
+                    if(in!=null){
+                        byte[] buffer=new byte[1024];int n;
+                        while((n=in.read(buffer))!=-1){out.write(buffer,0,n);if(out.size()>8192)break;}
+                        if(out.size()<=8192){
+                            Object detail=new JSONObject(out.toString("UTF-8")).opt("detail");
+                            if(detail instanceof String && ((String)detail).length()<=2048)message=(String)detail;
+                        }
+                    }
+                }catch(Exception ignored){}
+                throw new AgentException(status,message);
+            }
             try(java.io.InputStream in=c.getInputStream(); java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){
                 byte[] buffer=new byte[8192]; int n;
                 while((n=in.read(buffer))!=-1){out.write(buffer,0,n); if(out.size()>8*1024*1024)throw new java.io.IOException("Response too large");}

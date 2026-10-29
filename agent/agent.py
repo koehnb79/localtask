@@ -21,6 +21,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+from computer_actions import ComputerActions, PrepareAction, ConfirmAction
 
 LOG = logging.getLogger("localtask")
 
@@ -115,10 +116,11 @@ class Processes:
             raise HTTPException(403, "Operating system denied permission")
 
 
-def make_app(token: str, processes=None):
+def make_app(token: str, processes=None, computer_actions=None):
     if len(token) < 32:
         raise ValueError("A strong token is required")
     processes = processes or Processes()
+    computer_actions = computer_actions or ComputerActions()
     def authorize(authorization: str = Header(default="")):
         if not secrets.compare_digest(authorization.encode(), ("Bearer " + token).encode()):
             raise HTTPException(401, "Invalid access key")
@@ -133,6 +135,18 @@ def make_app(token: str, processes=None):
     @app.post("/v1/commands")
     def command(cmd: Command):
         return processes.command(cmd)
+
+    @app.get("/v1/computer-actions")
+    def available_computer_actions():
+        return computer_actions.describe()
+
+    @app.post("/v1/computer-actions/prepare")
+    def prepare_computer_action(cmd: PrepareAction):
+        return computer_actions.prepare(cmd.action)
+
+    @app.post("/v1/computer-actions/confirm")
+    def confirm_computer_action(cmd: ConfirmAction):
+        return computer_actions.execute(cmd.confirmation)
     return app
 
 
