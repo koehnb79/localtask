@@ -178,3 +178,14 @@ def test_pair_credentials_survive_separate_processes(tmp_path):
     second = json.loads(subprocess.check_output(command))
     assert first == second
     assert first == credentials(tmp_path/'persistent')
+
+
+def test_status_is_authenticated_without_enumerating_processes():
+    processes = listing_stub()
+    client = TestClient(make_app(TOKEN, processes))
+    assert client.get('/v1/status').status_code == 401
+    assert client.get('/v1/status', headers={'Authorization': 'Bearer wrong'}).status_code == 401
+    response = client.get('/v1/status', headers=AUTH)
+    assert response.status_code == 200
+    assert response.json() == {'status': 'ok'}
+    processes.snapshot.assert_not_called()

@@ -127,6 +127,11 @@ def make_app(token: str, processes=None, computer_actions=None):
     app = FastAPI(title="LocalTask", docs_url=None, redoc_url=None, openapi_url=None,
                   dependencies=[Depends(authorize)])
 
+    @app.get("/v1/status")
+    def status():
+        # Agent reachability only; does not enumerate processes or promise action availability.
+        return {"status": "ok"}
+
     @app.get("/v1/processes")
     def listing():
         return {"computer": socket.gethostname(), "os": platform.system(),

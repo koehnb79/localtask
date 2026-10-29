@@ -44,6 +44,18 @@ public final class AgentClient {
         base="https://"+host+":"+p;
     }
     public JSONObject processes() throws Exception {return request("/v1/processes",null);}
+    /** Uses the same pinned, authenticated transport as process control. */
+    public void checkOnline() throws Exception {
+        try {
+            if (!"ok".equals(request("/v1/status",null,3000).optString("status")))
+                throw new java.io.IOException("Unexpected status response");
+        } catch (AgentException e) {
+            if(e.status!=404)throw e;
+            // Compatibility with agents released before the status endpoint.
+            if(request("/v1/processes",null,3000).optJSONArray("processes")==null)
+                throw new java.io.IOException("Unexpected process response");
+        }
+    }
     public JSONObject command(JSONObject body)throws Exception{return request("/v1/commands",body);}
     public JSONObject computerActions()throws Exception{return request("/v1/computer-actions",null);}
     public JSONObject prepareComputerAction(String action)throws Exception{
@@ -58,12 +70,15 @@ public final class AgentClient {
         AgentException(int status,String message){super(message);this.status=status;}
     }
     private JSONObject request(String path,JSONObject body)throws Exception{
+        return request(path,body,0);
+    }
+    private JSONObject request(String path,JSONObject body,int timeout)throws Exception{
         HttpsURLConnection c=(HttpsURLConnection)new URL(base+path).openConnection();
         c.setSSLSocketFactory(sockets);
         // The exact certificate pin authenticates this computer, independent of DHCP hostname/IP.
         c.setHostnameVerifier((host,session)->true);
-        c.setInstanceFollowRedirects(false); c.setConnectTimeout(5000);
-        c.setReadTimeout(path.startsWith("/v1/computer-actions")?15000:8000);
+        c.setInstanceFollowRedirects(false); c.setConnectTimeout(timeout>0?timeout:5000);
+        c.setReadTimeout(timeout>0?timeout:path.startsWith("/v1/computer-actions")?15000:8000);
         c.setRequestProperty("Authorization","Bearer "+token);
         try {
             if(body!=null){

@@ -28,6 +28,16 @@ public final class AgentGuide {
         if ("Windows".equals(os)) return "Run ipconfig in PowerShell. Use the IPv4 Address under your active Wi-Fi or Ethernet adapter.";
         return "Open your network settings, or run hostname -I in a terminal. Use the IPv4 address of the adapter on the same network as your phone.";
     }
+    public static String linuxBoot() {
+        return "First configure services/localtask.service with the absolute Python, agent and configuration paths and your LAN IP. Copy it to ~/.config/systemd/user/localtask.service. Stop any manually started agent using the same port.\n\n"
+            + "Run as the account that owns the agent (sudo only for enable-linger):\n\n"
+            + "systemctl --user daemon-reload\n"
+            + "systemctl --user enable --now localtask.service\n"
+            + "sudo loginctl enable-linger \"$(id -un)\"\n"
+            + "loginctl show-user \"$(id -un)\" -p Linger\n"
+            + "systemctl --user status localtask.service\n\n"
+            + "Linger=yes enables your user services at boot and keeps them running after logout. Without lingering, this template starts at login. The agent remains your normal user. Its files and credentials must be available before login; a home directory unlocked only at login cannot support this setup. The template retries failures every 10 seconds. Reserve the LAN IP or keep your existing dynamic-IP startup script. Logout needs a logged-in graphical session; power actions still depend on local permissions.";
+    }
     public static String restart(String os) {
         return ("Windows".equals(os) ? ".\\.venv\\Scripts\\python.exe" : ".venv/bin/python")
             + " agent.py serve --host YOUR_LAN_IP";

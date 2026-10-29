@@ -11,6 +11,43 @@ import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
+    private final ThreadPoolExecutor statusWorkers=(ThreadPoolExecutor)Executors.newFixedThreadPool(3);
+    private final ArrayList<ComputerStatus> computerStatuses=new ArrayList<>();
+    private int statusEpoch=0;
+    private final Runnable statusPoll=new Runnable(){public void run(){
+        if(active){checkComputerStatuses();timer.postDelayed(this,15000);}
+    }};
+    private static final class ComputerStatus {
+        final JSONObject profile; final TextView label; boolean pending;
+        ComputerStatus(JSONObject profile,TextView label){this.profile=profile;this.label=label;}
+    }
+    private void stopStatusChecks(){
+        statusEpoch++;timer.removeCallbacks(statusPoll);statusWorkers.getQueue().clear();
+        for(ComputerStatus item:computerStatuses)item.pending=false;
+    }
+    private void checkComputerStatuses(){
+        if(!active || client!=null)return;
+        final int epoch=statusEpoch;
+        for(ComputerStatus item:computerStatuses){
+            if(item.pending)continue;
+            item.pending=true;
+            statusWorkers.execute(()->{
+                String result;
+                try{
+                    JSONObject p=item.profile;
+                    new AgentClient(p.getString("host"),p.getString("port"),p.getString("token"),p.getString("fingerprint")).checkOnline();
+                    result="● Online";
+                }catch(Exception e){result=ConnectionStatus.message(e);}
+                final String message=result;
+                runOnUiThread(()->{
+                    if(isDestroyed() || !active || epoch!=statusEpoch)return;
+                    item.pending=false;
+                    String checked=android.text.format.DateFormat.getTimeFormat(this).format(new Date());
+                    item.label.setText(message+" · Checked "+checked);
+                });
+            });
+        }
+    }
     private final Handler timer=new Handler(Looper.getMainLooper());
     private AgentClient client;
     private ProfileStore profileStore;
@@ -75,6 +112,7 @@ public class MainActivity extends Activity {
     private EditText input(LinearLayout box,String hint,String value){EditText e=new EditText(this);e.setSaveEnabled(false);e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);e.setHint(hint);e.setText(value);e.setSingleLine(true);box.addView(e);return e;}
     private void button(LinearLayout box,String label,Runnable action){Button b=new Button(this);b.setText(label);box.addView(b);b.setOnClickListener(v->action.run());}
     private LinearLayout connectionLayout(){
+        stopStatusChecks();computerStatuses.clear();
         generation++;client=null;rows.clear();visible.clear();list=null;query=null;showingShareQr=false;computerActionBusy=false;
         ScrollView scroll=new ScrollView(this);
         scroll.setFillViewport(true);
@@ -106,8 +144,11 @@ public class MainActivity extends Activity {
                     JSONObject profile=profiles.optJSONObject(i);
                     if(profile==null)continue;
                     button(box,profile.optString("name")+" · "+profile.optString("host"),()->connectProfile(profile));
+                    computerStatuses.add(new ComputerStatus(profile,text(box,"○ Checking…",15)));
                     button(box,"Edit / forget "+profile.optString("name"),()->editProfile(profile));
                 }
+                text(box,"Status refreshes every 15 seconds while this screen is open. Unreachable can mean asleep, a stopped agent, a changed IP, or a network issue.",14);
+                timer.removeCallbacks(statusPoll);if(active)timer.post(statusPoll);
                 button(box,"Add computer",()->editProfile(null));
                 button(box,"Scan computer QR",this::scanComputer);
             });
@@ -116,7 +157,7 @@ public class MainActivity extends Activity {
     private void connectProfile(JSONObject profile){
         try{
             client=new AgentClient(profile.getString("host"),profile.getString("port"),profile.getString("token"),profile.getString("fingerprint"));
-            generation++;processScreen();
+            stopStatusChecks();computerStatuses.clear();generation++;processScreen();
         }catch(Exception e){Toast.makeText(this,"Invalid connection details. Edit this saved computer.",Toast.LENGTH_LONG).show();}
     }
     private interface ProfileChange { void run() throws Exception; }
@@ -281,6 +322,10 @@ public class MainActivity extends Activity {
         text(box,"Next time",21);text(box,"From the same agent folder, start it with:",15);
         TextView restart=text(box,AgentGuide.restart(os),14);restart.setTypeface(android.graphics.Typeface.MONOSPACE);restart.setTextIsSelectable(true);
         text(box,"Use the same account and configuration folder. Restarting the agent does not change its fingerprint or token. Reserve its IP on your router, or edit the saved IP if it changes. Background startup is optional; the full README has the platform-specific steps.",15);
+        if("Linux".equals(os)){
+            text(box,"Start at boot (systemd)",21);
+            TextView boot=text(box,AgentGuide.linuxBoot(),15);boot.setTextIsSelectable(true);
+        }
         text(box,"Troubleshooting",21);
         text(box,"Cannot connect: check the agent is running, IP, port, firewall and network. HTTP 401: check the token or copy it again after revocation. Fingerprint mismatch: verify the certificate on the computer before editing the saved fingerprint. Windows termination is forceful and can lose unsaved work.",15);
         button(box,"Full background-service instructions",()->openGuideLink(AgentGuide.README));
@@ -419,7 +464,7 @@ public class MainActivity extends Activity {
             final String outcome=message;runOnUiThread(()->{if(!isDestroyed() && epoch==generation){Toast.makeText(this,outcome,Toast.LENGTH_LONG).show();refresh();}});
         });
     }
-    @Override protected void onResume(){super.onResume();active=true;timer.post(poll);}
-    @Override protected void onPause(){active=false;timer.removeCallbacks(poll);if(showingShareQr)connectionScreen();super.onPause();}
-    @Override protected void onDestroy(){generation++;worker.shutdownNow();super.onDestroy();}
+    @Override protected void onResume(){super.onResume();active=true;for(ComputerStatus item:computerStatuses)item.label.setText("○ Checking…");timer.post(poll);timer.post(statusPoll);}
+    @Override protected void onPause(){active=false;stopStatusChecks();timer.removeCallbacks(poll);if(showingShareQr)connectionScreen();super.onPause();}
+    @Override protected void onDestroy(){generation++;stopStatusChecks();statusWorkers.shutdownNow();worker.shutdownNow();super.onDestroy();}
 }

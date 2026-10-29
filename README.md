@@ -1,4 +1,4 @@
-# LocalTask — local-network prototype (Android 0.4 / Windows boot agent 0.5)
+# LocalTask — local-network prototype (Android 0.5 / Windows boot agent 0.5)
 
 An Android remote process manager with a Python agent for Linux, Windows and macOS.
 This is source code for a first development milestone, not a packaged or production-ready app.
@@ -121,7 +121,7 @@ Choose **Add computer**, give it a name (for example “My Mac”), and enter it
 
 All profile fields are encrypted using AES-GCM with a key in Android Keystore. The app disables screenshots, backups, and autofill/view-state saving for credential fields, and pauses polling when backgrounded. Credentials survive normal app updates signed with the same key. Uninstalling the app or clearing app data removes saved profiles. If the encryption key is lost or data cannot be decrypted, the app reports the problem instead of overwriting profiles; **Forget all saved computers** offers explicit recovery. No biometric prompt is required for reconnecting.
 
-Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; the Android app is version 0.4 (version code 8).
+Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; the Android app is version 0.5 (version code 9).
 
 Target SDK 35 is intentionally pinned for this initial development build. Before publishing or raising the target SDK, check current Android local-network permissions and Play requirements.
 
@@ -139,7 +139,21 @@ systemctl --user enable --now localtask.service
 journalctl --user -u localtask.service
 ```
 
-This starts for your user session. To remove startup: `systemctl --user disable --now localtask.service`, delete that unit file, and run `systemctl --user daemon-reload`. No automatic pre-login setup is included.
+This starts at login by default. To start **at boot, before login**, and keep running after logout, enable lingering for the normal account that owns the agent. Run from that account's terminal (do not run the whole shell as root):
+
+```bash
+sudo loginctl enable-linger "$(id -un)"
+loginctl show-user "$(id -un)" -p Linger
+systemctl --user is-enabled localtask.service
+systemctl --user status localtask.service
+journalctl --user -u localtask.service -b --no-pager -n 50
+```
+
+Expect `Linger=yes` and `enabled`. After a reboot, try connecting before signing in locally. The agent still runs as your ordinary user. Agent code, Python environment and credentials must be available before login; a home directory decrypted/mounted only at login prevents this. The unit retries startup failures every 10 seconds while networking comes up. Keep your dynamic-IP startup override if already configured; the supplied template uses a fixed address, so reserve that address on your router or update it and the phone's saved address when it changes. A user unit's `network-online.target` does not guarantee the system network is ready. Stop a manually running agent first to avoid a port conflict. Logout still requires a graphical session, and power actions depend on local policy.
+
+See [systemd's lingering documentation](https://www.freedesktop.org/software/systemd/man/latest/loginctl.html#enable-linger%20%5BUSER%E2%80%A6%5D).
+
+To remove startup: `systemctl --user disable --now localtask.service`, delete that unit file, and run `systemctl --user daemon-reload`. If you no longer need lingering for any user services, run `sudo loginctl disable-linger "$(id -un)"`; this affects all services for that account.
 
 ### macOS
 
@@ -278,3 +292,12 @@ Before a broader release: independent security review, per-device authorization,
 
 - QR scanner library: https://github.com/journeyapps/zxing-android-embedded
 - QR encoding/decoding: https://github.com/zxing/zxing
+
+
+## Saved-computer status (Android 0.5)
+
+Each saved computer shows Checking, Online, Unreachable, or an access/certificate/agent error with its last check time. Checks run on the computers screen while the app is in the foreground, every 15 seconds with up to three requests in parallel. Returning to the app checks again. Online means the saved agent accepted a pinned HTTPS, authenticated request; it does not guarantee every action is available. Unreachable does not prove the computer is powered off (sleep, firewall, changed IP or a stopped agent can also cause it).
+
+Updated agents provide a lightweight authenticated `/v1/status` endpoint. Older agents remain compatible through a read-only process-list fallback on HTTP 404. No credentials change and no process or power commands are issued by status checks. Rebuild/install Android 0.5 with the same signing key to preserve saved computers. Update/restart agents for the lightweight checks; existing agents do not need an update just to display status.
+
+Validation for this update: 43 agent tests passed with one existing live-process namespace skip; 17 JVM tests passed (status transport, status messages and QR transfer). Android Java source compilation passed against the API test jar. A full Gradle APK build, on-device lifecycle/UI checks and Linux pre-login boot still require testing on the target devices.
