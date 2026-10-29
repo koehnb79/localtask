@@ -21,6 +21,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+from contextlib import asynccontextmanager
+from metrics import Metrics
 from computer_actions import ComputerActions, PrepareAction, ConfirmAction
 
 LOG = logging.getLogger("localtask")
@@ -124,8 +126,20 @@ def make_app(token: str, processes=None, computer_actions=None):
     def authorize(authorization: str = Header(default="")):
         if not secrets.compare_digest(authorization.encode(), ("Bearer " + token).encode()):
             raise HTTPException(401, "Invalid access key")
-    app = FastAPI(title="LocalTask", docs_url=None, redoc_url=None, openapi_url=None,
+    metrics = Metrics()
+    @asynccontextmanager
+    async def lifespan(app):
+        metrics.start()
+        try:
+            yield
+        finally:
+            metrics.stop()
+    app = FastAPI(lifespan=lifespan, title="LocalTask", docs_url=None, redoc_url=None, openapi_url=None,
                   dependencies=[Depends(authorize)])
+
+    @app.get("/v1/metrics")
+    def system_metrics():
+        return metrics.snapshot()
 
     @app.get("/v1/status")
     def status():

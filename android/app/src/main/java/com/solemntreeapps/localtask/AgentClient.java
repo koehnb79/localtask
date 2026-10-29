@@ -43,6 +43,7 @@ public final class AgentClient {
         sockets=context.getSocketFactory(); this.token=token;
         base="https://"+host+":"+p;
     }
+    public JSONObject metrics() throws Exception {return request("/v1/metrics",null);}
     public JSONObject processes() throws Exception {return request("/v1/processes",null);}
     /** Uses the same pinned, authenticated transport as process control. */
     public void checkOnline() throws Exception {

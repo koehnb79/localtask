@@ -119,7 +119,7 @@ class NetworkService(BaseService):
                 ssl_keyfile=str(DATA / 'credentials' / 'key.pem'),
                 ssl_certfile=str(DATA / 'credentials' / 'cert.pem'), access_log=False,
                 limit_concurrency=16, timeout_keep_alive=5, timeout_graceful_shutdown=5,
-                loop='asyncio', http='h11', ws='none', lifespan='off', log_config=None))
+                loop='asyncio', http='h11', ws='none', lifespan='on', log_config=None))
             def serve():
                 try:
                     self.server.run()

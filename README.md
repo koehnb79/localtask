@@ -1,4 +1,4 @@
-# LocalTask — local-network prototype (Android 0.5 / Windows boot agent 0.5)
+# LocalTask — local-network prototype (Android 0.6 / Windows boot agent 0.5)
 
 An Android remote process manager with a Python agent for Linux, Windows and macOS.
 This is source code for a first development milestone, not a packaged or production-ready app.
@@ -121,7 +121,7 @@ Choose **Add computer**, give it a name (for example “My Mac”), and enter it
 
 All profile fields are encrypted using AES-GCM with a key in Android Keystore. The app disables screenshots, backups, and autofill/view-state saving for credential fields, and pauses polling when backgrounded. Credentials survive normal app updates signed with the same key. Uninstalling the app or clearing app data removes saved profiles. If the encryption key is lost or data cannot be decrypted, the app reports the problem instead of overwriting profiles; **Forget all saved computers** offers explicit recovery. No biometric prompt is required for reconnecting.
 
-Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; the Android app is version 0.5 (version code 9).
+Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; the Android app is version 0.6 (version code 10).
 
 Target SDK 35 is intentionally pinned for this initial development build. Before publishing or raising the target SDK, check current Android local-network permissions and Play requirements.
 
@@ -301,3 +301,41 @@ Each saved computer shows Checking, Online, Unreachable, or an access/certificat
 Updated agents provide a lightweight authenticated `/v1/status` endpoint. Older agents remain compatible through a read-only process-list fallback on HTTP 404. No credentials change and no process or power commands are issued by status checks. Rebuild/install Android 0.5 with the same signing key to preserve saved computers. Update/restart agents for the lightweight checks; existing agents do not need an update just to display status.
 
 Validation for this update: 43 agent tests passed with one existing live-process namespace skip; 17 JVM tests passed (status transport, status messages and QR transfer). Android Java source compilation passed against the API test jar. A full Gradle APK build, on-device lifecycle/UI checks and Linux pre-login boot still require testing on the target devices.
+
+
+## Tasker and dashboard (Android 0.6)
+
+### Update
+
+Pull the repository and rebuild/install Android with the same signing key. On Linux/macOS update the **entire agent folder**, including `metrics.py`, and restart the agent. For the frozen Windows boot services, rebuild the package and run the existing installer to update it; the service now enables ASGI lifespan to collect metrics. Pairing credentials are preserved. Old agents still support process lists and availability; the dashboard asks for an agent update when metrics are missing. Shutdown requires the existing computer-actions API (agent 0.4 or later).
+
+### Tasker actions
+
+1. In Tasker, create a task and add **Plugin → LocalTask**.
+2. Select a saved computer and **Check computer status** or **Shut down computer**, then Save.
+3. For shutdown, first enable **Allow Tasker shutdown without asking each time** in LocalTask → Edit computer → Save and connect. Then configure the Tasker action. This authorizes unattended shutdown, which can lose unsaved work. Existing agent permissions and operating-system prompts/inhibitors still apply.
+4. Use `%lt_status`, `%lt_online`, and `%lt_message` in subsequent Tasker actions. `%lt_status` is `online`, `unreachable`, `requested`, `denied`, `error`, `interrupted`, or `uncertain`. `%lt_online` is true only for a successful check. Unreachable is a completed check, not an assertion that power is off. Other failures return Tasker's error result; enable **Continue Task After Error** if you want to handle `%errmsg`.
+
+For periodic monitoring, have Tasker run **Check computer status** at your chosen interval and branch on the returned value. This release provides action plugins, not a continuously monitored Tasker state/event. It supports Tasker with Android package `net.dinglisch.android.taskerm`.
+
+Tasker stores a separate capability tied to one saved computer, action and connection revision; it does not receive the agent token or certificate pin. Treat exported Tasker tasks/backups as private because they contain that automation capability. Capability records are encrypted in LocalTask, are never QR-exported, and are checked again at execution time. Saving profile edits invalidates existing grants; configure those Tasker actions again. **Revoke all Tasker permissions** on the LocalTask home screen invalidates every grant. Revocation cannot recall a command already sent.
+
+Actions use expiring, non-persisted Android jobs. Android may delay or reject background work, particularly under battery restrictions. The plugin requests a 60-second Tasker timeout, refuses to start a new command after 45 seconds, and never automatically retries shutdown. A persisted execution claim prevents a restarted job from executing twice. Do not configure Tasker to retry shutdown automatically after an uncertain result. `requested` means the agent accepted the request, not that the computer finished shutting down. A lost reply after sending shutdown is `uncertain`. Open LocalTask and rerun a status check first when diagnosing background restrictions.
+
+### All-computer dashboard
+
+Choose **All computers · dashboard** on the home screen. The upper panel scrolls through computer cards with system CPU, memory and network charts. The lower panel combines processes from all saved computers, with search by computer/name/owner/PID and sorting by CPU, memory or name. It is read-only; use the existing single-computer screen to send process commands. It displays all processes the agent can inspect; OS permissions can hide protected processes.
+
+Foreground requests refresh every five seconds, with at most three computers being queried in parallel; slow/offline computers do not block healthy ones. Process rows are cleared when a computer cannot be reached, while its last graph is explicitly marked potentially stale. Old agents remain usable for process lists. The dashboard does not poll in the background.
+
+Updated agents independently sample every five seconds and retain **720 system samples (about one hour)** in bounded memory. History is available even if the phone was disconnected, and resets on agent/service restart (including a Windows adapter rebind). CPU is total machine utilization (0–100%); process CPU uses the existing one-core scale and may exceed 100%. Memory used is total minus available memory. Network is the sum of interface byte-counter deltas in KiB/s, with separate download/upload lines; virtual/VPN/loopback interfaces may double-count traffic, so this is not Internet-only bandwidth. Initial samples and counter/interface resets create gaps rather than invented zeros or spikes.
+
+Per-process historical charts and per-process network bandwidth are not part of this release. The graphs show computer-wide utilization; the process list shows each visible process's current CPU and resident memory. Tasker state-change events remain a later extension.
+
+### Validation and device checklist
+
+Development checks: **81 Python tests passed, 1 existing live-process namespace skip; 22 JVM tests passed.** Java production sources compiled against the API test jar. No full Gradle/APK build, Android instrumentation run, physical Tasker execution or native Windows package build was possible here. Treat this as a preview until the device checks below pass.
+
+The JVM checks cover authorization binding, opt-in, revoked/edited profiles, forged capabilities and QR exclusion in addition to transport and QR regressions. Python tests cover metric deltas, counter resets, bounded history, endpoint authentication and sampler shutdown. Android instrumentation checks include Tasker callback targeting, but require a device to run.
+
+Before using unattended shutdown, verify on your phone: Tasker status with LocalTask closed, sleeping/offline agents, wrong token/pin, grant revocation, profile edits, Android background restrictions, and a deliberate shutdown after saving work. Confirm Dashboard charts and rotation/background/foreground behavior on your Android version. No physical shutdown was performed during development.

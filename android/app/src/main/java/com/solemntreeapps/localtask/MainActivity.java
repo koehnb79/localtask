@@ -121,7 +121,18 @@ public class MainActivity extends Activity {
     }
     private void connectionScreen(){
         LinearLayout box=connectionLayout();text(box,"Your computers",30);
+        button(box,"All computers · dashboard",()->startActivity(new android.content.Intent(this,DashboardActivity.class)));
         button(box,"Agent setup guide",this::guideScreen);
+        button(box,"Tasker setup",()->new AlertDialog.Builder(this).setTitle("Use LocalTask in Tasker")
+            .setMessage("In Tasker, add a task action: Plugin → LocalTask. Select a saved computer and Check computer status or Shut down computer. Use %lt_status, %lt_online and %lt_message in your task.\n\nFor shutdown, first enable Allow Tasker shutdown in Edit computer and save. Saving edits invalidates existing Tasker actions for that computer; configure them again.\n\nUnreachable does not prove the computer is powered off. Android can delay background actions; do not automatically retry a shutdown with an uncertain result. Keep Tasker exports private.")
+            .setPositiveButton("Done",null).show());
+        button(box,"Revoke all Tasker permissions",()->new AlertDialog.Builder(this)
+            .setTitle("Revoke Tasker automation access?").setMessage("Existing Tasker actions will stop working until you configure them again. Agent pairing and manual controls stay available.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Revoke",(d,w)->worker.execute(()->{
+                boolean ok;try{new AutomationStore(this).revokeAll();ok=true;}catch(Exception e){ok=false;}
+                final String result=ok?"Tasker permissions revoked":"Could not revoke permissions";
+                runOnUiThread(()->{if(!isDestroyed())Toast.makeText(this,result,Toast.LENGTH_LONG).show();});
+            })).show());
         TextView note=text(box,"Loading saved computers…",15);
         final int epoch=generation;
         worker.execute(()->{
@@ -182,6 +193,9 @@ public class MainActivity extends Activity {
         EditText port=input(box,"Port",existing==null?"8765":existing.optString("port"));port.setInputType(2);
         EditText fingerprint=input(box,"SHA-256 certificate fingerprint",existing==null?"":existing.optString("fingerprint"));
         EditText token=input(box,"Access key",existing==null?"":existing.optString("token"));token.setInputType(129);
+        CheckBox taskerShutdown=new CheckBox(this);taskerShutdown.setText("Allow Tasker shutdown without asking each time");
+        taskerShutdown.setChecked(existing!=null && existing.optBoolean("taskerShutdown",false));box.addView(taskerShutdown);
+        text(box,"Enable only for computers you want Tasker to shut down automatically. Unsaved work may be lost. Saving edits revokes existing Tasker actions for this computer; configure them again in Tasker.",14);
         TextView error=text(box,"",14);
         Button save=new Button(this);save.setText("Save and connect");box.addView(save);
         save.setOnClickListener(v->{
@@ -190,7 +204,8 @@ public class MainActivity extends Activity {
                 if(label.isEmpty() || label.length()>64)throw new IllegalArgumentException("Enter a computer name of 1–64 characters");
                 JSONObject profile=new JSONObject().put("id",existing==null?UUID.randomUUID().toString():existing.getString("id"))
                     .put("name",label).put("host",host.getText().toString().trim()).put("port",port.getText().toString().trim())
-                    .put("token",token.getText().toString().trim()).put("fingerprint",fingerprint.getText().toString().trim());
+                    .put("token",token.getText().toString().trim()).put("fingerprint",fingerprint.getText().toString().trim())
+                    .put("taskerShutdown",taskerShutdown.isChecked()).put("automationRevision",UUID.randomUUID().toString());
                 new AgentClient(profile.getString("host"),profile.getString("port"),profile.getString("token"),profile.getString("fingerprint"));
                 save.setEnabled(false);error.setText("Saving…");final int epoch=generation;
                 worker.execute(()->{

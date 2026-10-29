@@ -17,7 +17,7 @@ Invoke-Checked $py @('-m','PyInstaller','--noconfirm','--clean','--onedir','--na
     '--distpath',(Join-Path $repo 'dist'), '--workpath',(Join-Path $repo 'build\windows'),
     '--specpath',(Join-Path $repo 'build'), '--paths',$agent,
     '--hidden-import','win32timezone','--hidden-import','uvicorn.loops.asyncio',
-    '--hidden-import','uvicorn.protocols.http.h11_impl','--hidden-import','uvicorn.lifespan.off',
+    '--hidden-import','uvicorn.protocols.http.h11_impl','--hidden-import','uvicorn.lifespan.on',
     (Join-Path $agent 'windows_boot_host.py'))
 Invoke-Checked (Join-Path $repo 'dist\LocalTaskHost\LocalTaskHost.exe') @('selftest')
 Write-Host "Built: $(Join-Path $repo 'dist\LocalTaskHost')"
