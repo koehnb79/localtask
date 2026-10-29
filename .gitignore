@@ -9,3 +9,8 @@ local.properties
 key.pem
 token
 windows-service.json
+
+.windows-build-env/
+dist/
+*.spec
+ipc.key

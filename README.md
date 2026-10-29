@@ -1,9 +1,15 @@
-# LocalTask — local-network prototype 0.4
+# LocalTask — local-network prototype (Android 0.4 / Windows boot agent 0.5)
 
 An Android remote process manager with a Python agent for Linux, Windows and macOS.
 This is source code for a first development milestone, not a packaged or production-ready app.
 
 Version 0.3.1 fixes a crash when opening **Scan computer QR** by explicitly including AndroidX Core in the app. Pull the update, sync Gradle, and rebuild/install over the existing app with the same signing key to retain saved computers.
+
+## Windows startup before sign-in (experimental 0.5)
+
+The new Windows boot-service package separates a LocalService HTTPS listener from a local privileged helper. It explicitly authorizes one desktop account by SID, starts without signing in, keeps running after logout, and can follow DHCP changes on a selected adapter. It preserves existing pairing credentials. Android 0.4 already supports its API; no Android rebuild is needed.
+
+See [Windows build, install, check, update and uninstall instructions](services/windows/README.md). The Python policy tests pass; the Windows-native build, installation, IPC permissions and boot/session behavior still need physical Windows testing. Do not remove the administrator check from the old adapter: use the new package and installer.
 
 ## Computer actions (0.4)
 
@@ -15,9 +21,9 @@ These controls use the existing paired access key. Anyone you share the key/QR w
 | --- | --- | --- |
 | Linux | Requires systemd-logind and an active local X11/Wayland session owned by the agent user. `loginctl terminate-session` ends that session's processes **without save prompts**. SSH/text sessions and other users' sessions are refused. | Uses systemd 248+ `systemctl --no-ask-password --check-inhibitors=yes poweroff/reboot`. Local logind/polkit policy must authorize the account. Blocking inhibitors are respected. |
 | macOS | Requires the agent user to own the foreground console desktop. Sends a System Events logout request. | Requests System Events shutdown/restart from that same foreground user's agent. macOS may require Automation permission for the launcher to control System Events. Local save/permission dialogs can block or cancel actions. |
-| Windows | Signs out the agent's own interactive session. Unavailable when the agent is running as a Windows service in session 0. | Uses the Windows shutdown tool with `/t 0` and **without `/f`**. The account needs the **Shut down the system** user right. Applications may block the request. |
+| Windows desktop / legacy service | Signs out the agent's own interactive session. Unavailable when the agent is running as a Windows service in session 0. | Uses the Windows shutdown tool with `/t 0` and **without `/f`**. The account needs the **Shut down the system** user right. Applications may block the request. |
 
-Keep the agent as a standard desktop user. LocalTask never invokes sudo, requests elevation, changes OS security policy, bypasses shutdown inhibitors, or automatically installs permission grants. If denied, inspect the computer's local permissions; a Linux user service may have different authorization from an interactive terminal. No blanket passwordless sudo rule is required or recommended. On Mac, check **System Settings → Privacy & Security → Automation** and any on-screen prompts. Windows service accounts may lack shutdown rights even when a desktop user has them.
+For the ordinary desktop agents and legacy service, keep the agent as a standard desktop user. Those modes never invoke sudo or request elevation. The separately installed Windows boot package uses the explicit service permissions described above; its network listener is never elevated. If denied, inspect the computer's local permissions; a Linux user service may have different authorization from an interactive terminal. No blanket passwordless sudo rule is required or recommended. On Mac, check **System Settings → Privacy & Security → Automation** and any on-screen prompts. Windows service accounts may lack shutdown rights even when a desktop user has them.
 
 The final confirmation expires after 60 seconds and can be used only once. The agent rechecks the session before dispatch, rejects overlapping actions, and applies a one-minute cooldown after dispatch. It does not queue actions for the next startup. Preparing/cancelling a confirmation never runs a command. A successful response means the OS request was sent, **not** that logout/shutdown/restart completed. If the connection ends or the OS times out, the app reports an uncertain outcome and does not automatically retry. Check the computer before sending another request.
 
@@ -115,13 +121,13 @@ Choose **Add computer**, give it a name (for example “My Mac”), and enter it
 
 All profile fields are encrypted using AES-GCM with a key in Android Keystore. The app disables screenshots, backups, and autofill/view-state saving for credential fields, and pauses polling when backgrounded. Credentials survive normal app updates signed with the same key. Uninstalling the app or clearing app data removes saved profiles. If the encryption key is lost or data cannot be decrypted, the app reports the problem instead of overwriting profiles; **Forget all saved computers** offers explicit recovery. No biometric prompt is required for reconnecting.
 
-Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; this release is version 0.3 (version code 6).
+Update the installed app with the same package name and signing key to retain data. The namespace remains `com.solemntreeapps.localtask`; the Android app is version 0.4 (version code 8).
 
 Target SDK 35 is intentionally pinned for this initial development build. Before publishing or raising the target SDK, check current Android local-network permissions and Play requirements.
 
 ## 3. Optional background startup
 
-Get foreground operation working first. The following service integrations are supplied but **have not been tested on their target operating systems**. They are user-scoped deliberately; management of other users' processes and privileged system processes is outside this version's scope.
+Get foreground operation working first. The following service integrations are supplied but **have not been tested on their target operating systems**. The Linux/Mac templates are user-scoped. The new Windows boot package manages only its explicitly configured user; privileged system processes remain protected.
 
 ### Linux
 
@@ -152,6 +158,8 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.localtask.agent.plist
 Then delete the plist.
 
 ### Windows
+
+For startup before sign-in and logout support, use the [new Windows boot package](services/windows/README.md). The following is the **legacy standard-user adapter**, retained for existing installations.
 
 Foreground mode is the easiest first test. The optional `agent/windows_service.py` uses pywin32; install pywin32 into the same environment and follow its installation requirements for your Python distribution. Copy `windows-service.example.json` to `windows-service.json` alongside the adapter, and replace its paths/IP.
 
