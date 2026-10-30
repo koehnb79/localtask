@@ -47,6 +47,10 @@ class HandleRegressionTests(unittest.TestCase):
         self.modules['win32pipe'] = Mock(spec=[
             'CreateNamedPipe', 'ConnectNamedPipe', 'DisconnectNamedPipe',
             'WaitNamedPipe', 'SetNamedPipeHandleState', 'PIPE_READMODE_MESSAGE'])
+        self.modules['win32file'] = Mock(spec=[
+            'CreateFile', 'ReadFile', 'WriteFile', 'AllocateReadBuffer',
+            'CancelIo', 'GetOverlappedResult'])
+        self.modules['win32event'].WAIT_OBJECT_0 = 0
         for name in ('win32api', 'pywintypes'):
             self.modules[name].error = WindowsError
         for name, value in dict(TOKEN_QUERY=8, TOKEN_ADJUST_PRIVILEGES=32,
@@ -143,6 +147,54 @@ class HandleRegressionTests(unittest.TestCase):
             self.native.Native().power(False)
         self.security.AdjustTokenPrivileges.assert_called_with(self.token, False, [])
         self.assertEqual(self.token.closed, 1)
+
+    def test_completed_io_does_not_cancel(self):
+        handle, ov = Handle(), types.SimpleNamespace(hEvent=Handle())
+        self.modules['win32event'].WaitForMultipleObjects.return_value = 0
+        api = self.modules['win32file']
+        api.GetOverlappedResult.return_value = 12
+        self.assertEqual(self.pipe._finish(handle, ov, None, 100), 12)
+        api.CancelIo.assert_not_called()
+        api.GetOverlappedResult.assert_called_once_with(handle, ov, False)
+
+    def test_timeout_and_stop_cancel_then_drain_pending_io(self):
+        for stopped, result in [(None, 258), (Handle(), 0)]:
+            with self.subTest(stopped=stopped):
+                handle, ov = Handle(), types.SimpleNamespace(hEvent=Handle())
+                self.modules['win32event'].WaitForMultipleObjects.return_value = result
+                api = self.modules['win32file']
+                api.reset_mock()
+                calls = []
+                api.CancelIo.side_effect = lambda h: calls.append(('cancel', h))
+                def drained(h, o, wait):
+                    calls.append(('drain', h, o, wait))
+                    raise WindowsError('operation aborted')
+                api.GetOverlappedResult.side_effect = drained
+                with self.assertRaises(TimeoutError):
+                    self.pipe._finish(handle, ov, stopped, 100)
+                self.assertEqual(calls, [('cancel', handle), ('drain', handle, ov, True)])
+
+    def test_cancellation_completion_race_still_reports_timeout(self):
+        handle, ov = Handle(), types.SimpleNamespace(hEvent=Handle())
+        self.modules['win32event'].WaitForMultipleObjects.return_value = 258
+        self.modules['win32file'].GetOverlappedResult.return_value = 12
+        with self.assertRaises(TimeoutError):
+            self.pipe._finish(handle, ov, None, 100)
+        self.modules['win32file'].CancelIo.assert_called_once_with(handle)
+        self.modules['win32file'].GetOverlappedResult.assert_called_once_with(handle, ov, True)
+
+    def test_transfer_timeout_closes_event_after_draining(self):
+        event = Handle()
+        self.modules['win32event'].CreateEvent.return_value = event
+        self.modules['win32event'].WaitForMultipleObjects.return_value = 258
+        api = self.modules['win32file']
+        def drain(*args):
+            self.assertEqual(event.closed, 0)
+            raise WindowsError('operation aborted')
+        api.GetOverlappedResult.side_effect = drain
+        with self.assertRaises(TimeoutError):
+            self.pipe.transfer(Handle(), None, data=b'check')
+        self.assertEqual(event.closed, 1)
 
     def test_pipe_authorization_closes_token_and_reverts(self):
         self.security.GetTokenInformation.return_value = [('service-sid', 4)]

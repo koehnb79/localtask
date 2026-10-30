@@ -28,7 +28,7 @@ def check_api():
         win32pipe: ('CreateNamedPipe', 'ConnectNamedPipe', 'DisconnectNamedPipe',
                     'WaitNamedPipe', 'SetNamedPipeHandleState'),
         win32file: ('CreateFile', 'ReadFile', 'WriteFile', 'AllocateReadBuffer',
-                    'CancelIoEx', 'GetOverlappedResult'),
+                    'CancelIo', 'GetOverlappedResult'),
         win32event: ('CreateEvent', 'WaitForSingleObject', 'WaitForMultipleObjects'),
         pywintypes: ('OVERLAPPED', 'SECURITY_ATTRIBUTES'),
     }
@@ -42,7 +42,10 @@ def _finish(handle, overlapped, stopped, timeout):
     handles = [overlapped.hEvent] if stopped is None else [stopped, overlapped.hEvent]
     result = win32event.WaitForMultipleObjects(handles, False, timeout)
     if result != win32event.WAIT_OBJECT_0 + len(handles) - 1:
-        win32file.CancelIoEx(handle, overlapped)
+        # Connect/read/write and this wait all run on the issuing thread.
+        # Each pipe handle has only one outstanding operation, so CancelIo
+        # safely cancels it without depending on a CancelIoEx Python wrapper.
+        win32file.CancelIo(handle)
         try:
             win32file.GetOverlappedResult(handle, overlapped, True)
         except pywintypes.error:
