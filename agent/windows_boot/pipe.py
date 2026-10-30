@@ -1,4 +1,5 @@
 """Local-only authenticated named-pipe IPC, bounded overlapped I/O, JSON only."""
+from contextlib import closing
 import secrets
 import threading
 import time
@@ -49,7 +50,7 @@ def transfer(handle, stopped, data=None, limit=MAX_RESPONSE):
 def _authorize_client(handle):
     win32pipe.ImpersonateNamedPipeClient(handle)
     try:
-        with win32security.OpenThreadToken(win32api.GetCurrentThread(), win32con.TOKEN_QUERY, True) as token:
+        with closing(win32security.OpenThreadToken(win32api.GetCurrentThread(), win32con.TOKEN_QUERY, True)) as token:
             groups = win32security.GetTokenInformation(token, win32security.TokenGroups)
             if not authorized_service_groups([(win32security.ConvertSidToStringSid(sid), attrs) for sid, attrs in groups]):
                 raise PermissionError('Caller is not the LocalTask network service')
@@ -124,8 +125,8 @@ class PipeClient:
         try:
             with self.lock:
                 win32pipe.WaitNamedPipe(PIPE_NAME, 5000)
-                with win32file.CreateFile(PIPE_NAME, CLIENT_ACCESS, 0, None, win32con.OPEN_EXISTING,
-                                         win32con.FILE_FLAG_OVERLAPPED, None) as handle:
+                with closing(win32file.CreateFile(PIPE_NAME, CLIENT_ACCESS, 0, None, win32con.OPEN_EXISTING,
+                                                 win32con.FILE_FLAG_OVERLAPPED, None)) as handle:
                     win32pipe.SetNamedPipeHandleState(handle, win32pipe.PIPE_READMODE_MESSAGE, None, None)
                     transfer(handle, None, data=raw)
                     reply = transfer(handle, None, limit=MAX_RESPONSE)

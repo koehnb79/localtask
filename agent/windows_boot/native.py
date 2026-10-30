@@ -1,7 +1,7 @@
 """Windows calls used only by the privileged helper. Never accepts shell commands."""
 import ctypes
 from ctypes import wintypes
-from contextlib import contextmanager
+from contextlib import closing
 
 import win32api
 import win32con
@@ -22,7 +22,7 @@ def token_sid(token):
 
 
 def own_sid():
-    with win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY) as token:
+    with closing(win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)) as token:
         return token_sid(token)
 
 
@@ -30,7 +30,7 @@ class ProcessHandle:
     def __init__(self, pid, terminate):
         self.handle = win32api.OpenProcess(0x1000 | (win32con.PROCESS_TERMINATE if terminate else 0), False, pid)
         try:
-            with win32security.OpenProcessToken(self.handle, win32con.TOKEN_QUERY) as token:
+            with closing(win32security.OpenProcessToken(self.handle, win32con.TOKEN_QUERY)) as token:
                 self.sid = token_sid(token)
             values = [wintypes.FILETIME() for _ in range(4)]
             if not _kernel.GetProcessTimes(int(self.handle), *[ctypes.byref(v) for v in values]):
@@ -74,7 +74,7 @@ class Native:
                 name = win32ts.WTSQuerySessionInformation(None, session, win32ts.WTSUserName)
                 if not name:
                     continue
-                with win32ts.WTSQueryUserToken(session) as token:
+                with closing(win32ts.WTSQueryUserToken(session)) as token:
                     sid = token_sid(token)
                     # AuthenticationId changes when a session ID is reused by a new logon.
                     login = str(win32security.GetTokenInformation(token, win32security.TokenStatistics)['AuthenticationId'])
@@ -91,7 +91,7 @@ class Native:
 
     def power(self, restart):
         try:
-            with win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY) as token:
+            with closing(win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY)) as token:
                 privilege = win32security.LookupPrivilegeValue(None, 'SeShutdownPrivilege')
                 old = win32security.AdjustTokenPrivileges(token, False, [(privilege, win32con.SE_PRIVILEGE_ENABLED)])
                 try:
