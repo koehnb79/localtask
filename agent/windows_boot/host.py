@@ -23,7 +23,7 @@ from agent import make_app, credentials, Processes, Command
 from computer_actions import PrepareAction, ConfirmAction
 from .native import Native, own_sid
 from .broker import BrokerDispatch
-from .pipe import PipeServer, PipeClient
+from .pipe import PipeServer, PipeClient, check_api
 from .policy import NETWORK_SERVICE, BROKER_SERVICE, validate_config, choose_address, Request, ManagedProcesses, ManagedActions
 
 DATA = Path(os.environ['ProgramData']) / 'SolemnTreeApps' / 'LocalTask'
@@ -143,10 +143,11 @@ class NetworkService(BaseService):
 def main():
     if len(sys.argv) == 2 and sys.argv[1] == 'selftest':
         # Read-only packaging smoke test, run before installation.
+        check_api()
         with Native().process(os.getpid()) as process:
             assert process.sid == own_sid()
             assert process.created > 0
-        print('Windows imports and read-only process inspection OK.')
+        print('Windows imports, pipe API availability and read-only process inspection OK.')
         return
     if len(sys.argv) == 2 and sys.argv[1] == 'check':
         import ssl

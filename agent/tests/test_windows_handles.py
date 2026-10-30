@@ -43,6 +43,10 @@ class HandleRegressionTests(unittest.TestCase):
         names = ['win32api', 'win32con', 'win32process', 'win32security',
                  'win32ts', 'pywintypes', 'win32event', 'win32file', 'win32pipe']
         self.modules = {name: Mock(name=name) for name in names}
+        # Unlike an unrestricted Mock, this rejects APIs owned by another module.
+        self.modules['win32pipe'] = Mock(spec=[
+            'CreateNamedPipe', 'ConnectNamedPipe', 'DisconnectNamedPipe',
+            'WaitNamedPipe', 'SetNamedPipeHandleState', 'PIPE_READMODE_MESSAGE'])
         for name in ('win32api', 'pywintypes'):
             self.modules[name].error = WindowsError
         for name, value in dict(TOKEN_QUERY=8, TOKEN_ADJUST_PRIVILEGES=32,
@@ -142,9 +146,33 @@ class HandleRegressionTests(unittest.TestCase):
 
     def test_pipe_authorization_closes_token_and_reverts(self):
         self.security.GetTokenInformation.return_value = [('service-sid', 4)]
-        self.pipe._authorize_client(Handle())
+        handle = Handle()
+        self.pipe._authorize_client(handle)
+        self.security.ImpersonateNamedPipeClient.assert_called_once_with(handle)
         self.assertEqual(self.token.closed, 1)
         self.security.RevertToSelf.assert_called_once()
+
+    def test_impersonation_failure_does_not_open_token(self):
+        self.security.ImpersonateNamedPipeClient.side_effect = WindowsError()
+        with self.assertRaises(WindowsError):
+            self.pipe._authorize_client(Handle())
+        self.security.OpenThreadToken.assert_not_called()
+        self.security.RevertToSelf.assert_not_called()
+
+    def test_token_open_failure_still_reverts_impersonation(self):
+        self.security.OpenThreadToken.side_effect = WindowsError()
+        with self.assertRaises(WindowsError):
+            self.pipe._authorize_client(Handle())
+        self.security.RevertToSelf.assert_called_once()
+
+    def test_packaging_api_check_accepts_expected_modules(self):
+        self.pipe.check_api()
+
+    def test_packaging_api_check_detects_missing_security_api(self):
+        self.security.__name__ = 'win32security'
+        self.security.ImpersonateNamedPipeClient = None
+        with self.assertRaisesRegex(RuntimeError, 'win32security.ImpersonateNamedPipeClient'):
+            self.pipe.check_api()
 
     def test_denied_pipe_caller_closes_token_and_reverts(self):
         self.security.GetTokenInformation.return_value = [('other-sid', 4)]

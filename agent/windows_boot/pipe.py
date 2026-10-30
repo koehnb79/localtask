@@ -19,6 +19,25 @@ from .policy import (PIPE_NAME, NETWORK_SERVICE, service_sid, encode_message, de
 CLIENT_ACCESS = 0x0012019B
 
 
+def check_api():
+    """Read-only packaging check: fail before install if a required API is missing."""
+    required = {
+        win32security: ('ImpersonateNamedPipeClient', 'RevertToSelf', 'OpenThreadToken',
+                        'GetTokenInformation', 'ConvertSidToStringSid',
+                        'ConvertStringSecurityDescriptorToSecurityDescriptor'),
+        win32pipe: ('CreateNamedPipe', 'ConnectNamedPipe', 'DisconnectNamedPipe',
+                    'WaitNamedPipe', 'SetNamedPipeHandleState'),
+        win32file: ('CreateFile', 'ReadFile', 'WriteFile', 'AllocateReadBuffer',
+                    'CancelIoEx', 'GetOverlappedResult'),
+        win32event: ('CreateEvent', 'WaitForSingleObject', 'WaitForMultipleObjects'),
+        pywintypes: ('OVERLAPPED', 'SECURITY_ATTRIBUTES'),
+    }
+    for module, names in required.items():
+        for name in names:
+            if not callable(getattr(module, name, None)):
+                raise RuntimeError('Missing Windows API: ' + module.__name__ + '.' + name)
+
+
 def _finish(handle, overlapped, stopped, timeout):
     handles = [overlapped.hEvent] if stopped is None else [stopped, overlapped.hEvent]
     result = win32event.WaitForMultipleObjects(handles, False, timeout)
@@ -48,7 +67,7 @@ def transfer(handle, stopped, data=None, limit=MAX_RESPONSE):
 
 
 def _authorize_client(handle):
-    win32pipe.ImpersonateNamedPipeClient(handle)
+    win32security.ImpersonateNamedPipeClient(handle)
     try:
         with closing(win32security.OpenThreadToken(win32api.GetCurrentThread(), win32con.TOKEN_QUERY, True)) as token:
             groups = win32security.GetTokenInformation(token, win32security.TokenGroups)
